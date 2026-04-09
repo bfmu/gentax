@@ -1,5 +1,5 @@
 # Stage 1: builder
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 # Install Tesseract build dependencies (required for CGO)
 RUN apt-get update && apt-get install -y \
