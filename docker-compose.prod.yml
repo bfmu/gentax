@@ -1,0 +1,34 @@
+# Production overlay — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Removes public port mappings (nginx-proxy-manager handles routing via the
+# external "proxy" network). Internal services stay on the "internal" network.
+
+services:
+  db:
+    ports: !reset []
+    networks:
+      - internal
+
+  api:
+    ports: !reset []
+    environment:
+      CORS_ORIGIN: "${CORS_ORIGIN}"
+      BOOTSTRAP_SECRET: "${BOOTSTRAP_SECRET}"
+    networks:
+      - proxy
+      - internal
+
+  web:
+    ports: !reset []
+    networks:
+      - proxy
+
+  bot:
+    networks:
+      - internal
+
+networks:
+  internal: {}
+  proxy:
+    external: true
