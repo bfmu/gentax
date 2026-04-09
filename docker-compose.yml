@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gentax
+      POSTGRES_USER: gentax
+      POSTGRES_PASSWORD: gentax
+    volumes:
+      - gentax_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gentax"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build: .
+    command: /bin/api
+    env_file: .env
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - gentax_receipts:/data/receipts
+    restart: unless-stopped
+
+  bot:
+    build: .
+    command: /bin/bot
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - gentax_receipts:/data/receipts
+    restart: unless-stopped
+
+volumes:
+  gentax_pgdata:
+  gentax_receipts:

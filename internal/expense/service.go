@@ -1,0 +1,152 @@
+package expense
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
+
+
+
+const (
+	defaultLimit = 20
+	maxLimit     = 100
+)
+
+type service struct {
+	repo Repository
+}
+
+// NewService constructs an expense Service backed by the given Repository.
+func NewService(repo Repository) Service {
+	return &service{repo: repo}
+}
+
+// canTransition returns true if transitioning from → to is permitted by the state machine.
+func canTransition(from, to Status) bool {
+	allowed, ok := validTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == to {
+			return true
+		}
+	}
+	return false
+}
+
+// Create validates input and creates a new expense with status=pending.
+// REQ-FRD-01: ReceiptID must not be nil (zero UUID).
+// REQ-FRD-04: OwnerID comes from service input (JWT claims), never from request params.
+func (s *service) Create(ctx context.Context, input CreateInput) (*Expense, error) {
+	if input.ReceiptID == uuid.Nil {
+		return nil, ErrReceiptRequired
+	}
+	return s.repo.Create(ctx, input)
+}
+
+// Confirm transitions a pending expense to confirmed (driver-side confirmation).
+// REQ-OCR-05: driver confirms OCR data → status=confirmed.
+func (s *service) Confirm(ctx context.Context, id, driverID uuid.UUID) error {
+	// GetByID with driverID as ownerID placeholder — we do a manual driverID check below.
+	// Repository GetByID requires ownerID; for driver-side confirm we look up by id only via a
+	// zero ownerID query then verify driverID ourselves.
+	// Design choice: use uuid.Nil as ownerID sentinel and let repo return the record,
+	// then verify driverID matches. However, the Repository interface requires ownerID scoping.
+	// To keep isolation intact we pass uuid.Nil and verify in the service.
+	// The repo must return the expense regardless of ownerID when ownerID==uuid.Nil.
+	// Better: call repo.GetByID with the expense's actual ownerID is unknown here.
+	// Solution: Repository has GetByID(id, ownerID). For Confirm we need to fetch by id+driverID.
+	// We model this by calling GetByID with uuid.Nil — the repo impl must handle this by
+	// skipping the owner_id filter when ownerID is uuid.Nil. Alternatively we add a
+	// GetByIDForDriver method. Per the spec, Confirm takes driverID not ownerID.
+	//
+	// Implementation decision: call GetByID(id, uuid.Nil) — repository skips owner filter when nil.
+	// This is documented and only used internally for the Confirm path.
+	exp, err := s.repo.GetByID(ctx, id, uuid.Nil)
+	if err != nil {
+		return err
+	}
+
+	// Verify the requesting driver owns this expense.
+	if exp.DriverID != driverID {
+		return ErrNotFound
+	}
+
+	if !canTransition(exp.Status, StatusConfirmed) {
+		return ErrInvalidTransition
+	}
+
+	return s.repo.UpdateStatus(ctx, id, exp.OwnerID, StatusConfirmed, nil, "")
+}
+
+// Approve transitions a confirmed expense to approved.
+// REQ-APR-02: only confirmed expenses may be approved.
+// reviewedBy is set to ownerID; reviewedAt is set to now() by the repository.
+func (s *service) Approve(ctx context.Context, id, ownerID uuid.UUID) error {
+	exp, err := s.repo.GetByID(ctx, id, ownerID)
+	if err != nil {
+		return err
+	}
+
+	if !canTransition(exp.Status, StatusApproved) {
+		return ErrInvalidTransition
+	}
+
+	return s.repo.UpdateStatus(ctx, id, ownerID, StatusApproved, &ownerID, "")
+}
+
+// Reject transitions a confirmed expense to rejected with an optional reason.
+// REQ-APR-03: only confirmed expenses may be rejected.
+func (s *service) Reject(ctx context.Context, id, ownerID uuid.UUID, reason string) error {
+	exp, err := s.repo.GetByID(ctx, id, ownerID)
+	if err != nil {
+		return err
+	}
+
+	if !canTransition(exp.Status, StatusRejected) {
+		return ErrInvalidTransition
+	}
+
+	return s.repo.UpdateStatus(ctx, id, ownerID, StatusRejected, &ownerID, reason)
+}
+
+// List returns expenses matching the filter, scoped to the owner.
+// Limit is clamped to [1, 100]; zero becomes defaultLimit (20).
+func (s *service) List(ctx context.Context, filter ListFilter) ([]*Expense, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = defaultLimit
+	} else if filter.Limit > maxLimit {
+		filter.Limit = maxLimit
+	}
+	return s.repo.List(ctx, filter)
+}
+
+// GetByID returns an expense by ID, scoped to the owner.
+// REQ-APR-04, REQ-TNT-03: wrong owner → ErrNotFound (not 403).
+func (s *service) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error) {
+	return s.repo.GetByID(ctx, id, ownerID)
+}
+
+// UpdateAmount updates the amount for an expense (used after OCR or manual correction).
+func (s *service) UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error {
+	return s.repo.UpdateAmount(ctx, id, amount)
+}
+
+// SumByTaxi returns aggregate totals per taxi for approved expenses in the date range.
+func (s *service) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error) {
+	return s.repo.SumByTaxi(ctx, ownerID, from, to)
+}
+
+// SumByDriver returns aggregate totals per driver for approved expenses in the date range.
+func (s *service) SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error) {
+	return s.repo.SumByDriver(ctx, ownerID, from, to)
+}
+
+// SumByCategory returns aggregate totals per category for approved expenses in the date range.
+func (s *service) SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error) {
+	return s.repo.SumByCategory(ctx, ownerID, from, to)
+}

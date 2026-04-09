@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gentax
+          POSTGRES_USER: gentax
+          POSTGRES_PASSWORD: gentax
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr libtesseract-dev libleptonica-dev
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout 5m
+
+      - name: Unit tests
+        run: go test -tags nocgo ./...
+
+      - name: Integration tests
+        env:
+          TEST_DATABASE_URL: postgres://gentax:gentax@localhost:5432/gentax?sslmode=disable
+        run: |
+          CGO_ENABLED=1 go test -tags integration -timeout 120s ./...
+
+      - name: Build
+        run: |
+          CGO_ENABLED=1 go build ./cmd/api ./cmd/bot
