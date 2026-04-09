@@ -16,6 +16,7 @@ import (
 	"github.com/bmunoz/gentax/internal/config"
 	"github.com/bmunoz/gentax/internal/driver"
 	"github.com/bmunoz/gentax/internal/expense"
+	"github.com/bmunoz/gentax/internal/owner"
 	"github.com/bmunoz/gentax/internal/receipt"
 	"github.com/bmunoz/gentax/internal/storage"
 	"github.com/bmunoz/gentax/internal/taxi"
@@ -31,10 +32,12 @@ type Deps struct {
 	DriverRepo  driver.Repository
 	ExpenseRepo expense.Repository
 	ReceiptRepo receipt.Repository
+	OwnerRepo   owner.Repository
 
 	TaxiSvc    taxi.Service
 	DriverSvc  driver.Service
 	ExpenseSvc expense.Service
+	OwnerSvc   owner.Service
 
 	Storage   receipt.StorageClient
 	Processor receipt.Processor
@@ -48,11 +51,13 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) (*Deps, error) {
 	driverRepo := driver.NewRepository(pool)
 	expenseRepo := expense.NewRepository(pool)
 	receiptRepo := receipt.NewRepository(pool)
+	ownerRepo := owner.NewRepository(pool)
 
 	// Services
 	taxiSvc := taxi.NewService(taxiRepo)
 	driverSvc := driver.NewService(driverRepo)
 	expenseSvc := expense.NewService(expenseRepo)
+	ownerSvc := owner.NewService(ownerRepo)
 
 	// JWT
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret)
@@ -92,10 +97,12 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) (*Deps, error) {
 		DriverRepo:  driverRepo,
 		ExpenseRepo: expenseRepo,
 		ReceiptRepo: receiptRepo,
+		OwnerRepo:   ownerRepo,
 
 		TaxiSvc:    taxiSvc,
 		DriverSvc:  driverSvc,
 		ExpenseSvc: expenseSvc,
+		OwnerSvc:   ownerSvc,
 
 		Storage:   storageClient,
 		Processor: processor,

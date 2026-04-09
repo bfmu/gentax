@@ -22,6 +22,9 @@ services:
     build: .
     command: /bin/api
     env_file: .env
+    environment:
+      CORS_ORIGIN: "http://localhost:${WEB_PORT:-3000}"
+      BOOTSTRAP_SECRET: "${BOOTSTRAP_SECRET:-}"
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
@@ -29,6 +32,17 @@ services:
         condition: service_healthy
     volumes:
       - gentax_receipts:/data/receipts
+    restart: unless-stopped
+
+  web:
+    build: .
+    command: /bin/web
+    environment:
+      WEB_PORT: "${WEB_PORT:-3000}"
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
     restart: unless-stopped
 
   bot:

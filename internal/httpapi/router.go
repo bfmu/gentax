@@ -12,16 +12,20 @@ import (
 	"github.com/bmunoz/gentax/internal/expense"
 	"github.com/bmunoz/gentax/internal/httpapi/handlers"
 	mw "github.com/bmunoz/gentax/internal/httpapi/middleware"
+	"github.com/bmunoz/gentax/internal/owner"
 	"github.com/bmunoz/gentax/internal/taxi"
 )
 
 // Services holds all domain service dependencies needed by the HTTP layer.
 type Services struct {
-	Auth          auth.TokenValidator
-	DriverFinder  handlers.DriverFinder // repository-level finder for auth bootstrap
-	Taxi          taxi.Service
-	Driver        driver.Service
-	Expense       expense.Service
+	Auth            auth.TokenValidator
+	DriverFinder    handlers.DriverFinder // repository-level finder for auth bootstrap
+	Taxi            taxi.Service
+	Driver          driver.Service
+	Expense         expense.Service
+	Owner           owner.Service
+	BootstrapSecret string
+	CORSOrigin      string
 }
 
 // NewRouter builds and returns the Chi router with all routes mounted.
@@ -51,18 +55,14 @@ type Services struct {
 func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 	r := chi.NewRouter()
 
-	// Global middleware: logging, panic recovery, content-type enforcement.
+	// Global middleware: logging, panic recovery, CORS.
 	r.Use(mw.RequestLogger)
 	r.Use(chimw.Recoverer)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			next.ServeHTTP(w, r)
-		})
-	})
+	r.Use(mw.CORS(svc.CORSOrigin))
 
 	// Handler instances.
 	authH := handlers.NewAuthHandler(svc.DriverFinder, issuer)
+	ownerAuthH := handlers.NewOwnerAuthHandler(svc.Owner, issuer, svc.BootstrapSecret)
 	taxiH := handlers.NewTaxiHandler(svc.Taxi, svc.Driver)
 	driverH := handlers.NewDriverHandler(svc.Driver)
 	expenseH := handlers.NewExpenseHandler(svc.Expense)
@@ -70,6 +70,8 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 
 	// Public routes — no JWT required.
 	r.Post("/auth/telegram", authH.TelegramAuth)
+	r.Post("/auth/owner/login", ownerAuthH.Login)
+	r.Post("/auth/owner/bootstrap", ownerAuthH.Bootstrap)
 
 	// Admin-protected routes (role=admin).
 	r.Group(func(r chi.Router) {

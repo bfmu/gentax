@@ -28,6 +28,10 @@ type Config struct {
 	// Optional (provider-dependent)
 	GoogleVisionAPIKey string
 	OpenAIAPIKey       string
+
+	// Optional (owner web panel)
+	BootstrapSecret string
+	CORSOrigin      string
 }
 
 // Load reads all required environment variables and returns a populated Config.
@@ -55,6 +59,8 @@ func Load() (*Config, error) {
 		AppEnv:              getEnvWithDefault("APP_ENV", "development"),
 		GoogleVisionAPIKey:  os.Getenv("GOOGLE_VISION_API_KEY"),
 		OpenAIAPIKey:        os.Getenv("OPENAI_API_KEY"),
+		BootstrapSecret:     os.Getenv("BOOTSTRAP_SECRET"),
+		CORSOrigin:          os.Getenv("CORS_ORIGIN"),
 	}
 
 	// Validate JWT_SECRET length (only if it was provided)

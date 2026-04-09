@@ -65,11 +65,14 @@ func main() {
 
 	// Build HTTP router.
 	svc := httpapi.Services{
-		Auth:         deps.JWTService,
-		DriverFinder: deps.DriverRepo,
-		Taxi:         deps.TaxiSvc,
-		Driver:       deps.DriverSvc,
-		Expense:      deps.ExpenseSvc,
+		Auth:            deps.JWTService,
+		DriverFinder:    deps.DriverRepo,
+		Taxi:            deps.TaxiSvc,
+		Driver:          deps.DriverSvc,
+		Expense:         deps.ExpenseSvc,
+		Owner:           deps.OwnerSvc,
+		BootstrapSecret: cfg.BootstrapSecret,
+		CORSOrigin:      cfg.CORSOrigin,
 	}
 	handler := httpapi.NewRouter(svc, deps.JWTService)
 

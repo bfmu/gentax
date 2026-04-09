@@ -1,0 +1,1 @@
+ALTER TABLE owners ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';
