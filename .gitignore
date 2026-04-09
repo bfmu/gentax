@@ -1,44 +1,59 @@
-# Binaries
+# ── Go binaries ───────────────────────────────────────────────────────────────
 bin/
+/bin/api
+/bin/bot
+/bin/web
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary
+# Test binaries and coverage
 *.test
-
-# Output of go coverage tool
 *.out
 coverage.html
+coverage.txt
 
-# Go workspace file
+# Go workspace
 go.work
 go.work.sum
 
 # Dependency directory
 vendor/
 
-# Environment files
+# ── Secrets / environment ─────────────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
-# IDE
+# ── Build artifacts ───────────────────────────────────────────────────────────
+dist/
+build/
+# React dist embedded by Docker — never commit
+cmd/web/dist/
+# Node
+node_modules/
+web/node_modules/
+
+# ── Data / uploads ────────────────────────────────────────────────────────────
+data/
+receipts/
+*.receipts/
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Build output
-dist/
-build/
-
-# sqlc generated (tracked, but ignore if regenerating)
+# ── sqlc generated (tracked intentionally — uncomment to ignore) ──────────────
 # internal/db/query/*.sql.go
