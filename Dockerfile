@@ -1,6 +1,9 @@
 # Stage 1: Node — build React web panel
 FROM node:20-alpine AS web-builder
 
+ARG VITE_API_URL=http://localhost:8080
+ENV VITE_API_URL=$VITE_API_URL
+
 WORKDIR /web
 
 COPY web/package*.json ./

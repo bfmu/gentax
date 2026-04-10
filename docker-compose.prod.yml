@@ -25,6 +25,10 @@ services:
 
   web:
     ports: !reset []
+    build:
+      context: .
+      args:
+        VITE_API_URL: "https://gentax-api.redflox.com"
     networks:
       - proxy
 
