@@ -16,8 +16,8 @@ export default function Taxis() {
   const [error, setError] = useState('');
 
   async function load() {
-    const res = await client.get<{ taxis: Taxi[] }>('/taxis');
-    setTaxis(res.data.taxis ?? []);
+    const res = await client.get<Taxi[]>('/taxis');
+    setTaxis(res.data ?? []);
   }
 
   useEffect(() => { load(); }, []);

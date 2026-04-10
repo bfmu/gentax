@@ -16,19 +16,25 @@ export default function Drivers() {
   const [phone, setPhone] = useState('');
   const [deepLink, setDeepLink] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [error, setError] = useState('');
 
   async function load() {
-    const res = await client.get<{ drivers: Driver[] }>('/drivers');
-    setDrivers(res.data.drivers ?? []);
+    const res = await client.get<Driver[]>('/drivers');
+    setDrivers(res.data ?? []);
   }
 
   useEffect(() => { load(); }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    await client.post('/drivers', { name, phone });
-    setName(''); setPhone('');
-    load();
+    setError('');
+    try {
+      await client.post('/drivers', { full_name: name, phone });
+      setName(''); setPhone('');
+      load();
+    } catch {
+      setError('Error al crear conductor. Verificá los datos.');
+    }
   }
 
   async function generateLink(driverID: string) {
@@ -57,6 +63,7 @@ export default function Drivers() {
           <Button type="submit">Agregar</Button>
         </div>
       </form>
+      {error && <p className="text-sm text-destructive mb-4">{error}</p>}
 
       <Table>
         <TableHeader>
