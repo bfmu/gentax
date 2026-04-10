@@ -4,6 +4,9 @@ FROM node:20-alpine AS web-builder
 ARG VITE_API_URL=http://localhost:8080
 ENV VITE_API_URL=$VITE_API_URL
 
+ARG VITE_BOT_USERNAME=gentax_bot
+ENV VITE_BOT_USERNAME=$VITE_BOT_USERNAME
+
 WORKDIR /web
 
 COPY web/package*.json ./

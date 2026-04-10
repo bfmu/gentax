@@ -29,6 +29,7 @@ services:
       context: .
       args:
         VITE_API_URL: "https://gentax-api.redflox.com"
+        VITE_BOT_USERNAME: "gestion_taxi_bot"
     networks:
       - proxy
 
