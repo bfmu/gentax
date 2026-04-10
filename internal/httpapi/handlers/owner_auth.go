@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bmunoz/gentax/internal/auth"
@@ -121,6 +122,50 @@ func (h *OwnerAuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(ownerAuthResponse{Token: token})
+}
+
+type ownerRegisterRequest struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// Register handles POST /auth/owner/register.
+// Returns 201 {"message":"registered"} on success.
+func (h *OwnerAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var req ownerRegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid request body", "bad_request")
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	req.Email = strings.TrimSpace(req.Email)
+	req.Password = strings.TrimSpace(req.Password)
+
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		mw.WriteError(w, http.StatusBadRequest, "name, email and password are required", "validation_error")
+		return
+	}
+
+	if len(req.Password) < 8 {
+		mw.WriteError(w, http.StatusBadRequest, "password must be at least 8 characters", "password_too_short")
+		return
+	}
+
+	_, err := h.svc.Create(r.Context(), req.Name, req.Email, req.Password)
+	if err != nil {
+		if errors.Is(err, owner.ErrDuplicateEmail) {
+			mw.WriteError(w, http.StatusConflict, "email already registered", "duplicate_email")
+			return
+		}
+		mw.WriteError(w, http.StatusInternalServerError, "internal server error", "internal_error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "registered"})
 }
 
 func (h *OwnerAuthHandler) issueOwnerToken(o *owner.Owner) (string, error) {

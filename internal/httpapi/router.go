@@ -72,6 +72,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 	r.Post("/auth/telegram", authH.TelegramAuth)
 	r.Post("/auth/owner/login", ownerAuthH.Login)
 	r.Post("/auth/owner/bootstrap", ownerAuthH.Bootstrap)
+	r.Post("/auth/owner/register", ownerAuthH.Register)
 
 	// Admin-protected routes (role=admin).
 	r.Group(func(r chi.Router) {

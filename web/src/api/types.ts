@@ -37,6 +37,8 @@ export interface Expense {
   status: 'pending' | 'confirmed' | 'approved' | 'rejected';
   notes: string;
   reject_reason: string;
+  receipt_image_url: string;
+  ocr_text: string;
   created_at: string;
 }
 

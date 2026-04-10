@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -155,5 +156,131 @@ func TestOwnerBootstrap_AlreadyExists(t *testing.T) {
 
 	assert.Equal(t, http.StatusConflict, w.Code)
 	ownerSvc.AssertNotCalled(t, "Create")
+	ownerSvc.AssertExpectations(t)
+}
+
+// --- OwnerRegister ---
+
+func TestOwnerRegister_Success(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	ownerID := uuid.New()
+	o := &owner.Owner{ID: ownerID, Name: "Test", Email: "t@t.com"}
+	ownerSvc.On("Create", matchAny, "Test", "t@t.com", "12345678").Return(o, nil)
+
+	body := `{"name":"Test","email":"t@t.com","password":"12345678"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, "registered", resp["message"])
+	ownerSvc.AssertExpectations(t)
+}
+
+func TestOwnerRegister_BadJSON(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString("not-json"))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorCode(t, w, "bad_request")
+}
+
+func TestOwnerRegister_MissingName(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	body := `{"name":"","email":"t@t.com","password":"12345678"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorCode(t, w, "validation_error")
+}
+
+func TestOwnerRegister_MissingEmail(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	body := `{"name":"Test","email":"","password":"12345678"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorCode(t, w, "validation_error")
+}
+
+func TestOwnerRegister_MissingPassword(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	body := `{"name":"Test","email":"t@t.com","password":""}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorCode(t, w, "validation_error")
+}
+
+func TestOwnerRegister_PasswordTooShort(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	body := `{"name":"Test","email":"t@t.com","password":"abc"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assertErrorCode(t, w, "password_too_short")
+}
+
+func TestOwnerRegister_DuplicateEmail(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	ownerSvc.On("Create", matchAny, "Test", "t@t.com", "12345678").Return(nil, owner.ErrDuplicateEmail)
+
+	body := `{"name":"Test","email":"t@t.com","password":"12345678"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assertErrorCode(t, w, "duplicate_email")
+	ownerSvc.AssertExpectations(t)
+}
+
+func TestOwnerRegister_ServiceError(t *testing.T) {
+	ownerSvc := new(mockOwnerService)
+	h := NewOwnerAuthHandler(ownerSvc, new(mockTokenIssuer), "")
+
+	ownerSvc.On("Create", matchAny, "Test", "t@t.com", "12345678").Return(nil, errors.New("db down"))
+
+	body := `{"name":"Test","email":"t@t.com","password":"12345678"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/owner/register", bytes.NewBufferString(body))
+
+	h.Register(w, r)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assertErrorCode(t, w, "internal_error")
 	ownerSvc.AssertExpectations(t)
 }
