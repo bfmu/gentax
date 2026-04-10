@@ -18,13 +18,13 @@ var (
 
 // Taxi represents a vehicle registered to an owner.
 type Taxi struct {
-	ID        uuid.UUID
-	OwnerID   uuid.UUID
-	Plate     string
-	Model     string
-	Year      int
-	Active    bool
-	CreatedAt time.Time
+	ID        uuid.UUID `json:"id"`
+	OwnerID   uuid.UUID `json:"owner_id"`
+	Plate     string    `json:"plate"`
+	Model     string    `json:"model"`
+	Year      int       `json:"year"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // CreateInput holds the data required to create a new taxi.

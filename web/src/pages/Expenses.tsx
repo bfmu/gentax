@@ -15,8 +15,8 @@ export default function Expenses() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   async function load() {
-    const res = await client.get<{ expenses: Expense[] }>('/expenses?status=confirmed');
-    setExpenses(res.data.expenses ?? []);
+    const res = await client.get<Expense[]>('/expenses?status=confirmed');
+    setExpenses(res.data ?? []);
   }
 
   useEffect(() => { load(); }, []);

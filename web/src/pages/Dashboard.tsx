@@ -18,14 +18,14 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       const [taxisRes, driversRes, expensesRes] = await Promise.all([
-        client.get<{ taxis: unknown[] }>('/taxis'),
-        client.get<{ drivers: unknown[] }>('/drivers'),
-        client.get<{ expenses: unknown[] }>('/expenses?status=confirmed'),
+        client.get<unknown[]>('/taxis'),
+        client.get<unknown[]>('/drivers'),
+        client.get<unknown[]>('/expenses?status=confirmed'),
       ]);
       setCounts({
-        taxis: taxisRes.data.taxis?.length ?? 0,
-        drivers: driversRes.data.drivers?.length ?? 0,
-        pending_expenses: expensesRes.data.expenses?.length ?? 0,
+        taxis: taxisRes.data?.length ?? 0,
+        drivers: driversRes.data?.length ?? 0,
+        pending_expenses: expensesRes.data?.length ?? 0,
       });
     }
     load();

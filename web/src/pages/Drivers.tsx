@@ -77,7 +77,7 @@ export default function Drivers() {
         <TableBody>
           {drivers.map(d => (
             <TableRow key={d.id}>
-              <TableCell>{d.name}</TableCell>
+              <TableCell>{d.full_name}</TableCell>
               <TableCell>{d.phone}</TableCell>
               <TableCell>{d.telegram_id ? '✓ Vinculado' : 'Sin vincular'}</TableCell>
               <TableCell>

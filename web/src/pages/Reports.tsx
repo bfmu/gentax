@@ -16,11 +16,11 @@ export default function Reports() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     const [taxiRes, driverRes] = await Promise.all([
-      client.get<{ reports: Report[] }>(`/reports/taxis?date_from=${dateFrom}&date_to=${dateTo}`),
-      client.get<{ reports: Report[] }>(`/reports/drivers?date_from=${dateFrom}&date_to=${dateTo}`),
+      client.get<Report[]>(`/reports/taxis?date_from=${dateFrom}&date_to=${dateTo}`),
+      client.get<Report[]>(`/reports/drivers?date_from=${dateFrom}&date_to=${dateTo}`),
     ]);
-    setTaxiReports(taxiRes.data.reports ?? []);
-    setDriverReports(driverRes.data.reports ?? []);
+    setTaxiReports(taxiRes.data ?? []);
+    setDriverReports(driverRes.data ?? []);
   }
 
   return (

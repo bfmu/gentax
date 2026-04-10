@@ -54,6 +54,38 @@ func scanExpense(row interface {
 	return &e, nil
 }
 
+// scanExpenseWithDetails reads expense columns plus driver_name and taxi_plate from a JOIN query.
+func scanExpenseWithDetails(row interface {
+	Scan(...interface{}) error
+}) (*Expense, error) {
+	var e Expense
+	var amount *decimal.Decimal
+	err := row.Scan(
+		&e.ID,
+		&e.OwnerID,
+		&e.DriverID,
+		&e.TaxiID,
+		&e.CategoryID,
+		&e.ReceiptID,
+		&amount,
+		&e.ExpenseDate,
+		&e.Notes,
+		&e.Status,
+		&e.RejectionReason,
+		&e.ReviewedBy,
+		&e.ReviewedAt,
+		&e.CreatedAt,
+		&e.UpdatedAt,
+		&e.DriverName,
+		&e.TaxiPlate,
+	)
+	if err != nil {
+		return nil, err
+	}
+	e.Amount = amount
+	return &e, nil
+}
+
 const selectExpenseCols = `
 	id, owner_id, driver_id, taxi_id, category_id, receipt_id,
 	amount, expense_date, notes, status, rejection_reason,
@@ -151,12 +183,18 @@ func (r *pgxRepository) List(ctx context.Context, filter ListFilter) ([]*Expense
 	}
 
 	q := fmt.Sprintf(`
-		SELECT %s FROM expenses
-		WHERE %s
-		ORDER BY created_at DESC
+		SELECT e.id, e.owner_id, e.driver_id, e.taxi_id, e.category_id, e.receipt_id,
+		       e.amount, e.expense_date, e.notes, e.status, e.rejection_reason,
+		       e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at,
+		       COALESCE(d.full_name, '') AS driver_name,
+		       COALESCE(t.plate, '') AS taxi_plate
+		FROM expenses e
+		LEFT JOIN drivers d ON d.id = e.driver_id
+		LEFT JOIN taxis t ON t.id = e.taxi_id
+		WHERE e.%s
+		ORDER BY e.created_at DESC
 		LIMIT $%d OFFSET $%d`,
-		selectExpenseCols,
-		strings.Join(where, " AND "),
+		strings.Join(where, " AND e."),
 		idx, idx+1,
 	)
 	args = append(args, limit, filter.Offset)
@@ -169,7 +207,7 @@ func (r *pgxRepository) List(ctx context.Context, filter ListFilter) ([]*Expense
 
 	var expenses []*Expense
 	for rows.Next() {
-		e, err := scanExpense(rows)
+		e, err := scanExpenseWithDetails(rows)
 		if err != nil {
 			return nil, err
 		}

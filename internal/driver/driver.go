@@ -21,16 +21,16 @@ var (
 
 // Driver represents a driver registered to an owner.
 type Driver struct {
-	ID                 uuid.UUID
-	OwnerID            uuid.UUID
-	TelegramID         *int64     // nil until linked via bot
-	FullName           string
-	Phone              string
-	Active             bool
-	LinkToken          *string
-	LinkTokenExpiresAt *time.Time
-	LinkTokenUsed      bool
-	CreatedAt          time.Time
+	ID                 uuid.UUID  `json:"id"`
+	OwnerID            uuid.UUID  `json:"owner_id"`
+	TelegramID         *int64     `json:"telegram_id"` // nil until linked via bot
+	FullName           string     `json:"full_name"`
+	Phone              string     `json:"phone"`
+	Active             bool       `json:"active"`
+	LinkToken          *string    `json:"-"`
+	LinkTokenExpiresAt *time.Time `json:"-"`
+	LinkTokenUsed      bool       `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 // Assignment represents a driver-taxi assignment record.

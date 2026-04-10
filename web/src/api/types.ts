@@ -18,7 +18,7 @@ export interface Taxi {
 export interface Driver {
   id: string;
   owner_id: string;
-  name: string;
+  full_name: string;
   phone: string;
   telegram_id: number | null;
   active: boolean;

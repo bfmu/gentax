@@ -38,21 +38,24 @@ var (
 
 // Expense represents a taxi fleet expense submitted by a driver.
 type Expense struct {
-	ID              uuid.UUID
-	OwnerID         uuid.UUID
-	DriverID        uuid.UUID
-	TaxiID          uuid.UUID
-	CategoryID      uuid.UUID
-	ReceiptID       uuid.UUID        // NOT NULL — fraud prevention (REQ-FRD-01)
-	Amount          *decimal.Decimal // may be nil until OCR or manual entry
-	ExpenseDate     *time.Time
-	Notes           string
-	Status          Status
-	RejectionReason string
-	ReviewedBy      *uuid.UUID
-	ReviewedAt      *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              uuid.UUID        `json:"id"`
+	OwnerID         uuid.UUID        `json:"owner_id"`
+	DriverID        uuid.UUID        `json:"driver_id"`
+	TaxiID          uuid.UUID        `json:"taxi_id"`
+	CategoryID      uuid.UUID        `json:"category_id"`
+	ReceiptID       uuid.UUID        `json:"receipt_id"`
+	Amount          *decimal.Decimal `json:"amount"` // may be nil until OCR or manual entry
+	ExpenseDate     *time.Time       `json:"expense_date"`
+	Notes           string           `json:"notes"`
+	Status          Status           `json:"status"`
+	RejectionReason string           `json:"rejection_reason"`
+	ReviewedBy      *uuid.UUID       `json:"reviewed_by"`
+	ReviewedAt      *time.Time       `json:"reviewed_at"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	// Populated by List queries via JOIN with drivers and taxis tables.
+	DriverName string `json:"driver_name"`
+	TaxiPlate  string `json:"taxi_plate"`
 }
 
 // CreateInput holds the data required to create a new expense.
@@ -82,18 +85,18 @@ type ListFilter struct {
 
 // TaxiSummary is one row in the per-taxi expense aggregate report.
 type TaxiSummary struct {
-	TaxiID    uuid.UUID
-	TaxiPlate string
-	Total     decimal.Decimal
-	Count     int
+	TaxiID    uuid.UUID       `json:"taxi_id"`
+	TaxiPlate string          `json:"taxi_plate"`
+	Total     decimal.Decimal `json:"total"`
+	Count     int             `json:"count"`
 }
 
 // DriverSummary is one row in the per-driver expense aggregate report.
 type DriverSummary struct {
-	DriverID   uuid.UUID
-	DriverName string
-	Total      decimal.Decimal
-	Count      int
+	DriverID   uuid.UUID       `json:"driver_id"`
+	DriverName string          `json:"driver_name"`
+	Total      decimal.Decimal `json:"total"`
+	Count      int             `json:"count"`
 }
 
 // CategorySummary is one row in the per-category expense aggregate report.
