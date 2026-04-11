@@ -33,7 +33,7 @@ type linkTokenResponse struct {
 	Token string `json:"token"`
 }
 
-// List handles GET /drivers — returns all drivers for the authenticated owner.
+// List handles GET /drivers — returns all drivers with their active taxi assignment.
 func (h *DriverHandler) List(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims == nil {
@@ -41,7 +41,7 @@ func (h *DriverHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	drivers, err := h.driverSvc.List(r.Context(), claims.OwnerID)
+	drivers, err := h.driverSvc.ListWithAssignment(r.Context(), claims.OwnerID)
 	if err != nil {
 		mw.DomainError(w, err)
 		return

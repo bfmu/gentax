@@ -115,6 +115,11 @@ func (s *service) AssignTaxi(ctx context.Context, driverID, taxiID, ownerID uuid
 	return err
 }
 
+// ListWithAssignment returns all drivers for the owner with their active taxi assignment.
+func (s *service) ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error) {
+	return s.repo.ListWithAssignment(ctx, ownerID)
+}
+
 // UnassignTaxi unassigns the current active taxi from a driver.
 func (s *service) UnassignTaxi(ctx context.Context, driverID, ownerID uuid.UUID) error {
 	if _, err := s.repo.GetByID(ctx, driverID, ownerID); err != nil {

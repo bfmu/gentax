@@ -232,6 +232,50 @@ func (r *pgxRepository) CreateAssignment(ctx context.Context, driverID, taxiID u
 	return &a, nil
 }
 
+// ListWithAssignment returns all drivers for the given owner with their active taxi
+// assignment (if any), using a single LEFT JOIN query to avoid N+1.
+func (r *pgxRepository) ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error) {
+	const q = `
+		SELECT d.id, d.owner_id, d.telegram_id, d.full_name, d.phone, d.active,
+		       d.link_token, d.link_token_expires_at, d.link_token_used, d.created_at,
+		       t.id, t.plate
+		FROM drivers d
+		LEFT JOIN driver_taxi_assignments dta
+		    ON dta.driver_id = d.id AND dta.unassigned_at IS NULL
+		LEFT JOIN taxis t ON t.id = dta.taxi_id
+		WHERE d.owner_id = $1
+		ORDER BY d.created_at DESC`
+
+	rows, err := r.pool.Query(ctx, q, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []*DriverWithAssignment
+	for rows.Next() {
+		var d Driver
+		var taxiID *uuid.UUID
+		var taxiPlate *string
+		if err := rows.Scan(
+			&d.ID, &d.OwnerID, &d.TelegramID, &d.FullName, &d.Phone, &d.Active,
+			&d.LinkToken, &d.LinkTokenExpiresAt, &d.LinkTokenUsed, &d.CreatedAt,
+			&taxiID, &taxiPlate,
+		); err != nil {
+			return nil, err
+		}
+		dwa := &DriverWithAssignment{Driver: &d}
+		if taxiID != nil && taxiPlate != nil {
+			dwa.AssignedTaxi = &AssignedTaxiView{ID: *taxiID, Plate: *taxiPlate}
+		}
+		results = append(results, dwa)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 // UnassignDriver sets unassigned_at=now() on the active assignment for the given driver.
 // Returns ErrNotFound if no active assignment exists.
 func (r *pgxRepository) UnassignDriver(ctx context.Context, driverID uuid.UUID) error {

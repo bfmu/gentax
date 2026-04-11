@@ -74,6 +74,14 @@ func (m *mockDriverService) List(ctx context.Context, ownerID uuid.UUID) ([]*dri
 	return args.Get(0).([]*driver.Driver), args.Error(1)
 }
 
+func (m *mockDriverService) ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*driver.DriverWithAssignment, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*driver.DriverWithAssignment), args.Error(1)
+}
+
 func (m *mockDriverService) AssignTaxi(ctx context.Context, driverID, taxiID, ownerID uuid.UUID) error {
 	args := m.Called(ctx, driverID, taxiID, ownerID)
 	return args.Error(0)

@@ -138,6 +138,73 @@ func TestDriverRepository_Assignment_Isolation(t *testing.T) {
 	assert.NotEqual(t, assignA.ID, assignB.ID)
 }
 
+// TestDriverRepository_ListWithAssignment_WithActiveAssignment verifies that a driver
+// with an active taxi assignment has assigned_taxi populated with the correct plate.
+func TestDriverRepository_ListWithAssignment_WithActiveAssignment(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := driver.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	d := testutil.CreateDriver(t, pool, owner.ID)
+	taxi := testutil.CreateTaxi(t, pool, owner.ID)
+
+	_, err := repo.CreateAssignment(ctx, d.ID, taxi.ID)
+	require.NoError(t, err)
+
+	results, err := repo.ListWithAssignment(ctx, owner.ID)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NotNil(t, results[0].AssignedTaxi, "expected AssignedTaxi to be non-nil")
+	assert.Equal(t, taxi.ID, results[0].AssignedTaxi.ID)
+	assert.Equal(t, taxi.Plate, results[0].AssignedTaxi.Plate)
+	assert.Equal(t, d.ID, results[0].ID)
+}
+
+// TestDriverRepository_ListWithAssignment_NoAssignment verifies that a driver
+// without an active assignment has assigned_taxi as nil.
+func TestDriverRepository_ListWithAssignment_NoAssignment(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := driver.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	d := testutil.CreateDriver(t, pool, owner.ID)
+
+	results, err := repo.ListWithAssignment(ctx, owner.ID)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Nil(t, results[0].AssignedTaxi, "expected AssignedTaxi to be nil for unassigned driver")
+	assert.Equal(t, d.ID, results[0].ID)
+}
+
+// TestDriverRepository_ListWithAssignment_UnassignedAfterClose verifies that after
+// a taxi is unassigned, assigned_taxi returns nil (uses unassigned_at IS NULL filter).
+func TestDriverRepository_ListWithAssignment_UnassignedAfterClose(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := driver.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	d := testutil.CreateDriver(t, pool, owner.ID)
+	taxi := testutil.CreateTaxi(t, pool, owner.ID)
+
+	_, err := repo.CreateAssignment(ctx, d.ID, taxi.ID)
+	require.NoError(t, err)
+
+	// Unassign the taxi.
+	err = repo.UnassignDriver(ctx, d.ID)
+	require.NoError(t, err)
+
+	results, err := repo.ListWithAssignment(ctx, owner.ID)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Nil(t, results[0].AssignedTaxi, "expected AssignedTaxi nil after unassignment")
+}
+
 // TestDriverRepository_Deactivate_UnassignsCurrent verifies that UnassignDriver sets
 // unassigned_at on the active assignment and GetActiveAssignment returns ErrNotFound after.
 func TestDriverRepository_Deactivate_UnassignsCurrent(t *testing.T) {

@@ -15,6 +15,11 @@ export interface Taxi {
   created_at: string;
 }
 
+export interface AssignedTaxi {
+  id: string;
+  plate: string;
+}
+
 export interface Driver {
   id: string;
   owner_id: string;
@@ -23,6 +28,7 @@ export interface Driver {
   telegram_id: number | null;
   active: boolean;
   created_at: string;
+  assigned_taxi: AssignedTaxi | null;
 }
 
 export interface Expense {

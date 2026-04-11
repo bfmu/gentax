@@ -33,6 +33,18 @@ type Driver struct {
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
+// AssignedTaxiView is a lightweight taxi view returned alongside a driver.
+type AssignedTaxiView struct {
+	ID    uuid.UUID `json:"id"`
+	Plate string    `json:"plate"`
+}
+
+// DriverWithAssignment enriches a Driver with its current active taxi assignment.
+type DriverWithAssignment struct {
+	*Driver
+	AssignedTaxi *AssignedTaxiView `json:"assigned_taxi"`
+}
+
 // Assignment represents a driver-taxi assignment record.
 type Assignment struct {
 	ID           uuid.UUID
@@ -64,6 +76,7 @@ type Repository interface {
 	GetActiveAssignment(ctx context.Context, driverID uuid.UUID) (*Assignment, error)
 	CreateAssignment(ctx context.Context, driverID, taxiID uuid.UUID) (*Assignment, error)
 	UnassignDriver(ctx context.Context, driverID uuid.UUID) error
+	ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error)
 }
 
 // Service exposes business operations on drivers.
@@ -75,4 +88,5 @@ type Service interface {
 	List(ctx context.Context, ownerID uuid.UUID) ([]*Driver, error)
 	AssignTaxi(ctx context.Context, driverID, taxiID, ownerID uuid.UUID) error
 	UnassignTaxi(ctx context.Context, driverID, ownerID uuid.UUID) error
+	ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error)
 }

@@ -231,6 +231,62 @@ func TestDriverService_Deactivate_WrongOwner(t *testing.T) {
 	_ = realOwnerID
 }
 
+// TestDriverService_ListWithAssignment_WithTaxi verifies that the service delegates
+// to the repository and returns drivers with their taxi assignment.
+func TestDriverService_ListWithAssignment_WithTaxi(t *testing.T) {
+	repo := new(driver.MockRepository)
+	svc := driver.NewService(repo)
+
+	ownerID := uuid.New()
+	taxiID := uuid.New()
+	driverID := uuid.New()
+
+	expected := []*driver.DriverWithAssignment{
+		{
+			Driver: &driver.Driver{ID: driverID, OwnerID: ownerID, FullName: "Juan", Active: true},
+			AssignedTaxi: &driver.AssignedTaxiView{ID: taxiID, Plate: "ABC-123"},
+		},
+	}
+
+	repo.On("ListWithAssignment", context.Background(), ownerID).Return(expected, nil)
+
+	got, err := svc.ListWithAssignment(context.Background(), ownerID)
+
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, driverID, got[0].ID)
+	require.NotNil(t, got[0].AssignedTaxi)
+	assert.Equal(t, "ABC-123", got[0].AssignedTaxi.Plate)
+	repo.AssertExpectations(t)
+}
+
+// TestDriverService_ListWithAssignment_NoTaxi verifies that drivers without
+// an active assignment have AssignedTaxi = nil.
+func TestDriverService_ListWithAssignment_NoTaxi(t *testing.T) {
+	repo := new(driver.MockRepository)
+	svc := driver.NewService(repo)
+
+	ownerID := uuid.New()
+	driverID := uuid.New()
+
+	expected := []*driver.DriverWithAssignment{
+		{
+			Driver:       &driver.Driver{ID: driverID, OwnerID: ownerID, FullName: "María", Active: true},
+			AssignedTaxi: nil,
+		},
+	}
+
+	repo.On("ListWithAssignment", context.Background(), ownerID).Return(expected, nil)
+
+	got, err := svc.ListWithAssignment(context.Background(), ownerID)
+
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Nil(t, got[0].AssignedTaxi)
+	assert.Equal(t, driverID, got[0].ID)
+	repo.AssertExpectations(t)
+}
+
 // TestDriverService_List_ReturnsOnlyOwnerDrivers verifies that all returned drivers
 // have the same owner_id as the requesting owner.
 func TestDriverService_List_ReturnsOnlyOwnerDrivers(t *testing.T) {

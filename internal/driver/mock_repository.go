@@ -105,3 +105,12 @@ func (m *MockRepository) UnassignDriver(ctx context.Context, driverID uuid.UUID)
 	args := m.Called(ctx, driverID)
 	return args.Error(0)
 }
+
+// ListWithAssignment mocks the ListWithAssignment method.
+func (m *MockRepository) ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*DriverWithAssignment), args.Error(1)
+}
