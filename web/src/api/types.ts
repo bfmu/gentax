@@ -38,13 +38,13 @@ export interface Expense {
   taxi_id: string;
   driver_name: string;
   taxi_plate: string;
-  category: string;
+  category_name: string;
   amount: string;
-  status: 'pending' | 'confirmed' | 'approved' | 'rejected';
+  status: 'pending' | 'confirmed' | 'needs_evidence' | 'approved' | 'rejected';
   notes: string;
-  reject_reason: string;
-  receipt_image_url: string;
-  ocr_text: string;
+  rejection_reason: string;
+  receipt_image_url: string | null;
+  ocr_raw?: string | null;
   created_at: string;
 }
 

@@ -74,6 +74,7 @@ type Repository interface {
 	MarkLinkTokenUsed(ctx context.Context, driverID uuid.UUID) error
 	SetTelegramID(ctx context.Context, driverID uuid.UUID, telegramID int64) error
 	GetActiveAssignment(ctx context.Context, driverID uuid.UUID) (*Assignment, error)
+	GetDriverTelegramID(ctx context.Context, driverID uuid.UUID) (*int64, error)
 	CreateAssignment(ctx context.Context, driverID, taxiID uuid.UUID) (*Assignment, error)
 	UnassignDriver(ctx context.Context, driverID uuid.UUID) error
 	ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*DriverWithAssignment, error)

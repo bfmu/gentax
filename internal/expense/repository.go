@@ -54,7 +54,8 @@ func scanExpense(row interface {
 	return &e, nil
 }
 
-// scanExpenseWithDetails reads expense columns plus driver_name and taxi_plate from a JOIN query.
+// scanExpenseWithDetails reads expense columns plus driver_name, taxi_plate, category_name,
+// receipt_image_url, and ocr_raw from a JOIN query.
 func scanExpenseWithDetails(row interface {
 	Scan(...interface{}) error
 }) (*Expense, error) {
@@ -78,6 +79,9 @@ func scanExpenseWithDetails(row interface {
 		&e.UpdatedAt,
 		&e.DriverName,
 		&e.TaxiPlate,
+		&e.CategoryName,
+		&e.ReceiptImageURL,
+		&e.OCRRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -111,23 +115,40 @@ func (r *pgxRepository) Create(ctx context.Context, input CreateInput) (*Expense
 }
 
 // GetByID retrieves an expense by its ID and ownerID.
-// Special case: if ownerID == uuid.Nil the owner filter is skipped (used by Confirm driver path).
+// Special case: if ownerID == uuid.Nil the owner filter is skipped (used by Confirm/SubmitEvidence driver path).
+// When ownerID is non-nil, the query uses JOINs to populate enriched fields (CategoryName, ReceiptImageURL, OCRRaw).
 // Returns ErrNotFound if no matching record exists.
 func (r *pgxRepository) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error) {
-	var (
-		q   string
-		row pgx.Row
-	)
-
 	if ownerID == uuid.Nil {
-		q = `SELECT ` + selectExpenseCols + ` FROM expenses WHERE id = $1`
-		row = r.pool.QueryRow(ctx, q, id)
-	} else {
-		q = `SELECT ` + selectExpenseCols + ` FROM expenses WHERE id = $1 AND owner_id = $2`
-		row = r.pool.QueryRow(ctx, q, id, ownerID)
+		// Driver path: simple query without JOINs (performance-sensitive).
+		q := `SELECT ` + selectExpenseCols + ` FROM expenses WHERE id = $1`
+		row := r.pool.QueryRow(ctx, q, id)
+		e, err := scanExpense(row)
+		if err != nil {
+			return nil, mapExpensePgError(err)
+		}
+		return e, nil
 	}
 
-	e, err := scanExpense(row)
+	// Owner path: full JOIN query with enriched fields.
+	const q = `
+		SELECT e.id, e.owner_id, e.driver_id, e.taxi_id, e.category_id, e.receipt_id,
+		       e.amount, e.expense_date, e.notes, e.status, e.rejection_reason,
+		       e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at,
+		       COALESCE(d.full_name, '') AS driver_name,
+		       COALESCE(t.plate, '') AS taxi_plate,
+		       COALESCE(ec.name, '') AS category_name,
+		       CASE WHEN r.storage_url = 'manual-entry' THEN '' ELSE COALESCE(r.storage_url, '') END AS receipt_image_url,
+		       r.ocr_raw::text AS ocr_raw
+		FROM expenses e
+		LEFT JOIN drivers d ON d.id = e.driver_id
+		LEFT JOIN taxis t ON t.id = e.taxi_id
+		LEFT JOIN expense_categories ec ON ec.id = e.category_id
+		LEFT JOIN receipts r ON r.id = e.receipt_id
+		WHERE e.id = $1 AND e.owner_id = $2`
+
+	row := r.pool.QueryRow(ctx, q, id, ownerID)
+	e, err := scanExpenseWithDetails(row)
 	if err != nil {
 		return nil, mapExpensePgError(err)
 	}
@@ -187,10 +208,15 @@ func (r *pgxRepository) List(ctx context.Context, filter ListFilter) ([]*Expense
 		       e.amount, e.expense_date, e.notes, e.status, e.rejection_reason,
 		       e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at,
 		       COALESCE(d.full_name, '') AS driver_name,
-		       COALESCE(t.plate, '') AS taxi_plate
+		       COALESCE(t.plate, '') AS taxi_plate,
+		       COALESCE(ec.name, '') AS category_name,
+		       CASE WHEN r.storage_url = 'manual-entry' THEN '' ELSE COALESCE(r.storage_url, '') END AS receipt_image_url,
+		       r.ocr_raw::text AS ocr_raw
 		FROM expenses e
 		LEFT JOIN drivers d ON d.id = e.driver_id
 		LEFT JOIN taxis t ON t.id = e.taxi_id
+		LEFT JOIN expense_categories ec ON ec.id = e.category_id
+		LEFT JOIN receipts r ON r.id = e.receipt_id
 		WHERE e.%s
 		ORDER BY e.created_at DESC
 		LIMIT $%d OFFSET $%d`,
@@ -254,6 +280,38 @@ func (r *pgxRepository) UpdateAmount(ctx context.Context, id uuid.UUID, amount d
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateReceiptID updates the receipt_id for an expense (used when a driver submits additional evidence).
+// Maps no-rows to ErrNotFound.
+func (r *pgxRepository) UpdateReceiptID(ctx context.Context, id uuid.UUID, receiptID uuid.UUID) error {
+	const q = `UPDATE expenses SET receipt_id = $1, updated_at = now() WHERE id = $2`
+	tag, err := r.pool.Exec(ctx, q, receiptID, id)
+	if err != nil {
+		return mapExpensePgError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListCategories returns all expense categories for the given owner, ordered by name.
+func (r *pgxRepository) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id, name FROM expense_categories WHERE owner_id=$1 ORDER BY name`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cats []*ExpenseCategory
+	for rows.Next() {
+		var c ExpenseCategory
+		if err := rows.Scan(&c.ID, &c.Name); err != nil {
+			return nil, err
+		}
+		cats = append(cats, &c)
+	}
+	return cats, rows.Err()
 }
 
 // SumByTaxi returns aggregate approved expense totals per taxi for the given date range.

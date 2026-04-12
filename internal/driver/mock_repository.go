@@ -82,6 +82,15 @@ func (m *MockRepository) SetTelegramID(ctx context.Context, driverID uuid.UUID, 
 	return args.Error(0)
 }
 
+// GetDriverTelegramID mocks the GetDriverTelegramID method.
+func (m *MockRepository) GetDriverTelegramID(ctx context.Context, driverID uuid.UUID) (*int64, error) {
+	args := m.Called(ctx, driverID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*int64), args.Error(1)
+}
+
 // GetActiveAssignment mocks the GetActiveAssignment method.
 func (m *MockRepository) GetActiveAssignment(ctx context.Context, driverID uuid.UUID) (*Assignment, error) {
 	args := m.Called(ctx, driverID)

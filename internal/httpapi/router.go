@@ -18,14 +18,15 @@ import (
 
 // Services holds all domain service dependencies needed by the HTTP layer.
 type Services struct {
-	Auth            auth.TokenValidator
-	DriverFinder    handlers.DriverFinder // repository-level finder for auth bootstrap
-	Taxi            taxi.Service
-	Driver          driver.Service
-	Expense         expense.Service
-	Owner           owner.Service
-	BootstrapSecret string
-	CORSOrigin      string
+	Auth              auth.TokenValidator
+	DriverFinder      handlers.DriverFinder // repository-level finder for auth bootstrap
+	Taxi              taxi.Service
+	Driver            driver.Service
+	Expense           expense.Service
+	Owner             owner.Service
+	EvidenceNotifier  handlers.EvidenceNotifier // optional; nil disables Telegram notifications
+	BootstrapSecret   string
+	CORSOrigin        string
 }
 
 // NewRouter builds and returns the Chi router with all routes mounted.
@@ -65,7 +66,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 	ownerAuthH := handlers.NewOwnerAuthHandler(svc.Owner, issuer, svc.BootstrapSecret)
 	taxiH := handlers.NewTaxiHandler(svc.Taxi, svc.Driver)
 	driverH := handlers.NewDriverHandler(svc.Driver)
-	expenseH := handlers.NewExpenseHandler(svc.Expense)
+	expenseH := handlers.NewExpenseHandler(svc.Expense).WithEvidenceNotifier(svc.EvidenceNotifier)
 	reportH := handlers.NewReportHandler(svc.Expense)
 
 	// Public routes — no JWT required.
@@ -96,6 +97,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 		r.Get("/expenses/{id}", expenseH.GetByID)
 		r.Patch("/expenses/{id}/approve", expenseH.Approve)
 		r.Patch("/expenses/{id}/reject", expenseH.Reject)
+		r.Patch("/expenses/{id}/request-evidence", expenseH.RequestEvidence)
 
 		// Reports.
 		r.Get("/reports/expenses", reportH.ExpenseList)

@@ -10,6 +10,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
+
 // telegramUser is a lightweight tele.Recipient backed by a Telegram user ID.
 type telegramUser struct {
 	id int64
@@ -28,6 +29,28 @@ func (b *Bot) NotifyRejection(ctx context.Context, telegramID int64, expenseID u
 		msg = fmt.Sprintf("Tu gasto fue rechazado. Motivo: %s", reason)
 	}
 	return b.send(&telegramUser{id: telegramID}, msg)
+}
+
+// NotifyEvidenceRequest looks up the expense's driver and sends a Telegram notification
+// informing them that additional evidence is required.
+// Best-effort: errors are logged but never propagate to the caller.
+func (b *Bot) NotifyEvidenceRequest(ctx context.Context, expenseID uuid.UUID, message string) error {
+	exp, err := b.services.Expense.GetByID(ctx, expenseID, uuid.Nil)
+	if err != nil {
+		return nil // best-effort: driver path lookup failed, skip
+	}
+	tid, err := b.services.DriverRepo.GetDriverTelegramID(ctx, exp.DriverID)
+	if err != nil || tid == nil {
+		return nil // driver has no telegram linked, skip
+	}
+	text := "El administrador solicita más evidencia para tu gasto."
+	if strings.TrimSpace(message) != "" {
+		text += "\n\n" + message
+	}
+	text += "\n\nUsá /soporte para enviar la foto del comprobante."
+	chat := &tele.Chat{ID: *tid}
+	_, err = b.sender.Send(chat, text)
+	return err
 }
 
 // NotifyOCRResult sends an OCR processing result to the driver.

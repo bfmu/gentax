@@ -24,6 +24,17 @@ func newExpenseRouter(h *ExpenseHandler) http.Handler {
 	return r
 }
 
+func newExpenseRouterWithEvidence(h *ExpenseHandler) http.Handler {
+	r := chi.NewRouter()
+	r.Get("/expenses", h.List)
+	r.Get("/expenses/{id}", h.GetByID)
+	r.Post("/expenses", h.Create)
+	r.Patch("/expenses/{id}/approve", h.Approve)
+	r.Patch("/expenses/{id}/reject", h.Reject)
+	r.Patch("/expenses/{id}/request-evidence", h.RequestEvidence)
+	return r
+}
+
 // TestExpenseHandler_Create_MissingReceiptID verifies that creating an expense without
 // a receipt_id returns 422 (REQ-FRD-01).
 func TestExpenseHandler_Create_MissingReceiptID(t *testing.T) {
@@ -206,6 +217,115 @@ func TestExpenseHandler_List_MaxLimit(t *testing.T) {
 	call := expSvc.Calls[0]
 	filter := call.Arguments[1].(expense.ListFilter)
 	assert.Equal(t, maxLimit, filter.Limit)
+}
+
+// TestExpenseHandler_RequestEvidence tests the RequestEvidence handler.
+func TestExpenseHandler_RequestEvidence(t *testing.T) {
+	t.Run("200_valid_request", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		claims, ownerID := adminClaims()
+		expID := uuid.New()
+
+		expSvc.On("RequestEvidence", matchAny, expID, ownerID, "please re-send receipt").Return(nil)
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/"+expID.String()+"/request-evidence", claims)
+		r.Body = jsonBody(map[string]string{"message": "please re-send receipt"})
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		expSvc.AssertExpectations(t)
+	})
+
+	t.Run("400_malformed_uuid", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		claims, _ := adminClaims()
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/not-a-uuid/request-evidence", claims)
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		expSvc.AssertNotCalled(t, "RequestEvidence")
+	})
+
+	t.Run("422_invalid_transition", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		claims, ownerID := adminClaims()
+		expID := uuid.New()
+
+		expSvc.On("RequestEvidence", matchAny, expID, ownerID, "msg").Return(expense.ErrInvalidTransition)
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/"+expID.String()+"/request-evidence", claims)
+		r.Body = jsonBody(map[string]string{"message": "msg"})
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+		expSvc.AssertExpectations(t)
+	})
+
+	t.Run("404_not_found", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		claims, ownerID := adminClaims()
+		expID := uuid.New()
+
+		expSvc.On("RequestEvidence", matchAny, expID, ownerID, "msg").Return(expense.ErrNotFound)
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/"+expID.String()+"/request-evidence", claims)
+		r.Body = jsonBody(map[string]string{"message": "msg"})
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		expSvc.AssertExpectations(t)
+	})
+
+	t.Run("400_empty_message", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		claims, ownerID := adminClaims()
+		expID := uuid.New()
+
+		expSvc.On("RequestEvidence", matchAny, expID, ownerID, "").Return(expense.ErrEvidenceMessageRequired)
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/"+expID.String()+"/request-evidence", claims)
+		r.Body = jsonBody(map[string]string{"message": ""})
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		expSvc.AssertExpectations(t)
+	})
+
+	t.Run("401_no_claims", func(t *testing.T) {
+		expSvc := &mockExpenseService{}
+		h := NewExpenseHandler(expSvc, nil)
+
+		expID := uuid.New()
+
+		rtr := newExpenseRouterWithEvidence(h)
+		w := httptest.NewRecorder()
+		r := newAuthRequest(http.MethodPatch, "/expenses/"+expID.String()+"/request-evidence", nil)
+		rtr.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		expSvc.AssertNotCalled(t, "RequestEvidence")
+	})
 }
 
 // TestExpenseHandler_GetByID_Success verifies a single expense is returned with 200.

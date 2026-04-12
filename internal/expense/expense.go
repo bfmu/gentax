@@ -14,26 +14,30 @@ import (
 type Status string
 
 const (
-	StatusPending   Status = "pending"
-	StatusConfirmed Status = "confirmed" // driver-confirmed, awaiting admin approval
-	StatusApproved  Status = "approved"
-	StatusRejected  Status = "rejected"
+	StatusPending       Status = "pending"
+	StatusConfirmed     Status = "confirmed"      // driver-confirmed, awaiting admin approval
+	StatusNeedsEvidence Status = "needs_evidence" // owner requested additional evidence from driver
+	StatusApproved      Status = "approved"
+	StatusRejected      Status = "rejected"
 )
 
 // validTransitions defines the allowed state machine moves.
 // Terminal states (approved, rejected) have no outgoing transitions.
 var validTransitions = map[Status][]Status{
-	StatusPending:   {StatusConfirmed},
-	StatusConfirmed: {StatusApproved, StatusRejected},
-	StatusApproved:  {},
-	StatusRejected:  {},
+	StatusPending:       {StatusConfirmed},
+	StatusConfirmed:     {StatusApproved, StatusRejected, StatusNeedsEvidence},
+	StatusNeedsEvidence: {StatusConfirmed, StatusRejected},
+	StatusApproved:      {},
+	StatusRejected:      {},
 }
 
 // Sentinel errors for the expense domain.
 var (
-	ErrNotFound          = errors.New("expense not found")
-	ErrReceiptRequired   = errors.New("receipt is required for every expense")
-	ErrInvalidTransition = errors.New("invalid status transition")
+	ErrNotFound                = errors.New("expense not found")
+	ErrReceiptRequired         = errors.New("receipt is required for every expense")
+	ErrInvalidTransition       = errors.New("invalid status transition")
+	ErrEvidenceNotAllowed      = errors.New("expense is not in a state that allows evidence request")
+	ErrEvidenceMessageRequired = errors.New("evidence request message is required")
 )
 
 // Expense represents a taxi fleet expense submitted by a driver.
@@ -53,9 +57,12 @@ type Expense struct {
 	ReviewedAt      *time.Time       `json:"reviewed_at"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
-	// Populated by List queries via JOIN with drivers and taxis tables.
-	DriverName string `json:"driver_name"`
-	TaxiPlate  string `json:"taxi_plate"`
+	// Populated by List queries via JOIN with drivers, taxis, expense_categories, and receipts tables.
+	DriverName     string  `json:"driver_name"`
+	TaxiPlate      string  `json:"taxi_plate"`
+	CategoryName   string  `json:"category_name"`
+	ReceiptImageURL string `json:"receipt_image_url"`
+	OCRRaw         *string `json:"ocr_raw,omitempty"`
 }
 
 // CreateInput holds the data required to create a new expense.
@@ -107,6 +114,12 @@ type CategorySummary struct {
 	Count        int
 }
 
+// ExpenseCategory is a lightweight view of an expense category used in UIs.
+type ExpenseCategory struct {
+	ID   uuid.UUID
+	Name string
+}
+
 // Repository defines the persistence contract for expenses.
 // Every method that filters records MUST include owner_id to enforce multi-tenant isolation.
 type Repository interface {
@@ -115,6 +128,8 @@ type Repository interface {
 	List(ctx context.Context, filter ListFilter) ([]*Expense, error)
 	UpdateStatus(ctx context.Context, id, ownerID uuid.UUID, status Status, reviewedBy *uuid.UUID, rejectionReason string) error
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
+	UpdateReceiptID(ctx context.Context, id uuid.UUID, receiptID uuid.UUID) error
+	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)
@@ -126,9 +141,12 @@ type Service interface {
 	Confirm(ctx context.Context, id, driverID uuid.UUID) error
 	Approve(ctx context.Context, id, ownerID uuid.UUID) error
 	Reject(ctx context.Context, id, ownerID uuid.UUID, reason string) error
+	RequestEvidence(ctx context.Context, id, ownerID uuid.UUID, message string) error
+	SubmitEvidence(ctx context.Context, id, driverID uuid.UUID, receiptID uuid.UUID) error
 	List(ctx context.Context, filter ListFilter) ([]*Expense, error)
 	GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error)
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
+	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)

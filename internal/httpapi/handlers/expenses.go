@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -19,14 +20,33 @@ const (
 	maxLimit     = 100
 )
 
+// EvidenceNotifier sends a Telegram notification to the driver when evidence is requested.
+// Implementations must be nil-safe — the handler checks for nil before calling.
+type EvidenceNotifier interface {
+	NotifyEvidenceRequest(ctx context.Context, expenseID uuid.UUID, message string) error
+}
+
 // ExpenseHandler handles /expenses endpoints.
 type ExpenseHandler struct {
-	expenseSvc expense.Service
+	expenseSvc       expense.Service
+	evidenceNotifier EvidenceNotifier
 }
 
 // NewExpenseHandler constructs an ExpenseHandler.
-func NewExpenseHandler(expenseSvc expense.Service) *ExpenseHandler {
-	return &ExpenseHandler{expenseSvc: expenseSvc}
+// The optional notifier is used to send Telegram notifications when evidence is requested.
+// Pass nil to disable notifications.
+func NewExpenseHandler(expenseSvc expense.Service, notifier ...EvidenceNotifier) *ExpenseHandler {
+	h := &ExpenseHandler{expenseSvc: expenseSvc}
+	if len(notifier) > 0 {
+		h.evidenceNotifier = notifier[0]
+	}
+	return h
+}
+
+// WithEvidenceNotifier sets the optional notifier for evidence requests and returns the handler.
+func (h *ExpenseHandler) WithEvidenceNotifier(n EvidenceNotifier) *ExpenseHandler {
+	h.evidenceNotifier = n
+	return h
 }
 
 // createExpenseRequest is the request body for POST /expenses.
@@ -181,6 +201,41 @@ func (h *ExpenseHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+// requestEvidenceRequest is the body for PATCH /expenses/{id}/request-evidence.
+type requestEvidenceRequest struct {
+	Message string `json:"message"`
+}
+
+// RequestEvidence handles PATCH /expenses/{id}/request-evidence (role=admin).
+// Transitions the expense to needs_evidence and optionally notifies the driver via Telegram.
+func (h *ExpenseHandler) RequestEvidence(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		mw.WriteError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid expense id", "bad_request")
+		return
+	}
+
+	var req requestEvidenceRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if err := h.expenseSvc.RequestEvidence(r.Context(), id, claims.OwnerID, req.Message); err != nil {
+		mw.DomainError(w, err)
+		return
+	}
+
+	if h.evidenceNotifier != nil {
+		go func() { _ = h.evidenceNotifier.NotifyEvidenceRequest(context.Background(), id, req.Message) }()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "needs_evidence"})
 }
 
 // parseListFilter reads query parameters from the request and builds a ListFilter.

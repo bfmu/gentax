@@ -71,6 +71,9 @@ func DomainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, expense.ErrInvalidTransition):
 		WriteError(w, http.StatusConflict, err.Error(), "invalid_transition")
 
+	case errors.Is(err, expense.ErrEvidenceMessageRequired):
+		WriteError(w, http.StatusBadRequest, err.Error(), "bad_request")
+
 	default:
 		WriteError(w, http.StatusInternalServerError, "internal server error", "internal_error")
 	}

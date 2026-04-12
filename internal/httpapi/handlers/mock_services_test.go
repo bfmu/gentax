@@ -119,6 +119,16 @@ func (m *mockExpenseService) Reject(ctx context.Context, id, ownerID uuid.UUID, 
 	return args.Error(0)
 }
 
+func (m *mockExpenseService) RequestEvidence(ctx context.Context, id, ownerID uuid.UUID, message string) error {
+	args := m.Called(ctx, id, ownerID, message)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) SubmitEvidence(ctx context.Context, id, driverID uuid.UUID, receiptID uuid.UUID) error {
+	args := m.Called(ctx, id, driverID, receiptID)
+	return args.Error(0)
+}
+
 func (m *mockExpenseService) List(ctx context.Context, filter expense.ListFilter) ([]*expense.Expense, error) {
 	args := m.Called(ctx, filter)
 	if args.Get(0) == nil {
@@ -138,6 +148,14 @@ func (m *mockExpenseService) GetByID(ctx context.Context, id, ownerID uuid.UUID)
 func (m *mockExpenseService) UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error {
 	args := m.Called(ctx, id, amount)
 	return args.Error(0)
+}
+
+func (m *mockExpenseService) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*expense.ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*expense.ExpenseCategory), args.Error(1)
 }
 
 func (m *mockExpenseService) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*expense.TaxiSummary, error) {

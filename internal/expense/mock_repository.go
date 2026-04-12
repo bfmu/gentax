@@ -53,6 +53,21 @@ func (m *MockRepository) UpdateAmount(ctx context.Context, id uuid.UUID, amount 
 	return args.Error(0)
 }
 
+// UpdateReceiptID mocks the UpdateReceiptID method.
+func (m *MockRepository) UpdateReceiptID(ctx context.Context, id uuid.UUID, receiptID uuid.UUID) error {
+	args := m.Called(ctx, id, receiptID)
+	return args.Error(0)
+}
+
+// ListCategories mocks the ListCategories method.
+func (m *MockRepository) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*ExpenseCategory), args.Error(1)
+}
+
 // SumByTaxi mocks the SumByTaxi method.
 func (m *MockRepository) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error) {
 	args := m.Called(ctx, ownerID, from, to)

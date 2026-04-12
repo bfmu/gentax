@@ -199,6 +199,17 @@ func (r *pgxRepository) SetTelegramID(ctx context.Context, driverID uuid.UUID, t
 	return nil
 }
 
+// GetDriverTelegramID returns the telegram_id for the given driverID, or nil if unlinked.
+// Returns ErrNotFound if the driver does not exist.
+func (r *pgxRepository) GetDriverTelegramID(ctx context.Context, driverID uuid.UUID) (*int64, error) {
+	var telegramID *int64
+	err := r.pool.QueryRow(ctx, `SELECT telegram_id FROM drivers WHERE id = $1`, driverID).Scan(&telegramID)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	return telegramID, nil
+}
+
 // GetActiveAssignment returns the current active (unassigned_at IS NULL) assignment for a driver.
 // Returns ErrNotFound if no active assignment exists.
 func (r *pgxRepository) GetActiveAssignment(ctx context.Context, driverID uuid.UUID) (*Assignment, error) {

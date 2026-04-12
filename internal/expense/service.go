@@ -2,6 +2,7 @@ package expense
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,6 +115,44 @@ func (s *service) Reject(ctx context.Context, id, ownerID uuid.UUID, reason stri
 	return s.repo.UpdateStatus(ctx, id, ownerID, StatusRejected, &ownerID, reason)
 }
 
+// RequestEvidence transitions a confirmed expense to needs_evidence,
+// storing the owner's message in the rejection_reason column.
+// Idempotent: if already in needs_evidence, updates the message and returns nil.
+// REQ-EVD-02: message must be non-empty; expense must be in confirmed or needs_evidence state.
+func (s *service) RequestEvidence(ctx context.Context, id, ownerID uuid.UUID, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return ErrEvidenceMessageRequired
+	}
+	exp, err := s.repo.GetByID(ctx, id, ownerID)
+	if err != nil {
+		return err
+	}
+	// Idempotent re-request: already in needs_evidence → just refresh the message.
+	if exp.Status != StatusNeedsEvidence && !canTransition(exp.Status, StatusNeedsEvidence) {
+		return ErrInvalidTransition
+	}
+	return s.repo.UpdateStatus(ctx, id, ownerID, StatusNeedsEvidence, nil, message)
+}
+
+// SubmitEvidence transitions a needs_evidence expense back to confirmed after a driver uploads a new receipt.
+// The driver must match the expense's driverID for security.
+func (s *service) SubmitEvidence(ctx context.Context, id, driverID uuid.UUID, receiptID uuid.UUID) error {
+	exp, err := s.repo.GetByID(ctx, id, uuid.Nil) // driver path: skip owner filter
+	if err != nil {
+		return err
+	}
+	if exp.DriverID != driverID {
+		return ErrNotFound
+	}
+	if exp.Status != StatusNeedsEvidence {
+		return ErrInvalidTransition
+	}
+	if err := s.repo.UpdateReceiptID(ctx, id, receiptID); err != nil {
+		return err
+	}
+	return s.repo.UpdateStatus(ctx, id, exp.OwnerID, StatusConfirmed, nil, "")
+}
+
 // List returns expenses matching the filter, scoped to the owner.
 // Limit is clamped to [1, 100]; zero becomes defaultLimit (20).
 func (s *service) List(ctx context.Context, filter ListFilter) ([]*Expense, error) {
@@ -134,6 +173,11 @@ func (s *service) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense,
 // UpdateAmount updates the amount for an expense (used after OCR or manual correction).
 func (s *service) UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error {
 	return s.repo.UpdateAmount(ctx, id, amount)
+}
+
+// ListCategories returns all expense categories for the given owner.
+func (s *service) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error) {
+	return s.repo.ListCategories(ctx, ownerID)
 }
 
 // SumByTaxi returns aggregate totals per taxi for approved expenses in the date range.

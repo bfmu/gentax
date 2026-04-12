@@ -28,6 +28,7 @@ type Sender interface {
 type DriverRepo interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*driver.Driver, error)
 	GetActiveAssignment(ctx context.Context, driverID uuid.UUID) (*driver.Assignment, error)
+	GetDriverTelegramID(ctx context.Context, driverID uuid.UUID) (*int64, error)
 }
 
 // Services bundles all domain dependencies needed by the bot.
@@ -75,6 +76,7 @@ func (b *Bot) registerHandlers(bot *tele.Bot) {
 	bot.Handle("/start", b.handleStart)
 	bot.Handle("/gasto", b.handleGasto)
 	bot.Handle("/estado", b.handleEstado)
+	bot.Handle("/soporte", b.handleSoporte)
 
 	// Callback handlers for inline keyboards
 	bot.Handle(&tele.Btn{Unique: callbackSelectTaxi}, b.handleTaxiSelection)

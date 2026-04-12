@@ -8,10 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pendiente',
   confirmed: 'Confirmado',
+  needs_evidence: 'Necesita evidencia',
   approved: 'Aprobado',
   rejected: 'Rechazado',
 };
@@ -19,6 +21,7 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   pending: 'secondary',
   confirmed: 'default',
+  needs_evidence: 'secondary',
   approved: 'default',
   rejected: 'destructive',
 };
@@ -30,6 +33,8 @@ export default function ExpenseDetail() {
   const [error, setError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false);
+  const [evidenceMessage, setEvidenceMessage] = useState('');
 
   async function load() {
     try {
@@ -62,6 +67,17 @@ export default function ExpenseDetail() {
     load();
   }
 
+  function openRequestEvidence() {
+    setEvidenceMessage('');
+    setEvidenceDialogOpen(true);
+  }
+
+  async function confirmRequestEvidence() {
+    await client.patch(`/expenses/${id}/request-evidence`, { message: evidenceMessage });
+    setEvidenceDialogOpen(false);
+    load();
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen p-8 max-w-3xl mx-auto">
@@ -89,7 +105,7 @@ export default function ExpenseDetail() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>{expense.category}</span>
+            <span>{expense.category_name}</span>
             <Badge variant={STATUS_VARIANTS[expense.status] ?? 'default'}>
               {STATUS_LABELS[expense.status] ?? expense.status}
             </Badge>
@@ -122,10 +138,10 @@ export default function ExpenseDetail() {
             </div>
           )}
 
-          {expense.reject_reason && (
+          {expense.rejection_reason && (
             <div>
               <p className="text-muted-foreground text-sm">Motivo de rechazo</p>
-              <p className="text-sm text-destructive">{expense.reject_reason}</p>
+              <p className="text-sm text-destructive">{expense.rejection_reason}</p>
             </div>
           )}
         </CardContent>
@@ -144,19 +160,24 @@ export default function ExpenseDetail() {
         </Card>
       )}
 
-      {expense.ocr_text && (
+      {expense.ocr_raw && (
         <Card>
           <CardHeader><CardTitle className="text-base">Texto OCR</CardTitle></CardHeader>
           <CardContent>
-            <pre className="text-xs whitespace-pre-wrap bg-muted p-3 rounded">{expense.ocr_text}</pre>
+            <pre className="text-xs whitespace-pre-wrap bg-muted p-3 rounded">{expense.ocr_raw}</pre>
           </CardContent>
         </Card>
       )}
 
-      {expense.status === 'confirmed' && (
+      {(expense.status === 'confirmed' || expense.status === 'needs_evidence') && (
         <div className="flex gap-3">
-          <Button onClick={approve}>Aprobar</Button>
-          <Button variant="destructive" onClick={openReject}>Rechazar</Button>
+          {expense.status === 'confirmed' && (
+            <>
+              <Button onClick={approve}>Aprobar</Button>
+              <Button variant="destructive" onClick={openReject}>Rechazar</Button>
+            </>
+          )}
+          <Button variant="outline" onClick={openRequestEvidence}>Pedir más soportes</Button>
         </div>
       )}
 
@@ -175,6 +196,27 @@ export default function ExpenseDetail() {
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
               <Button variant="destructive" onClick={confirmReject}>Confirmar rechazo</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={evidenceDialogOpen} onOpenChange={setEvidenceDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Pedir más soportes</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Mensaje para el conductor</Label>
+              <Textarea
+                value={evidenceMessage}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEvidenceMessage(e.target.value)}
+                placeholder="Ej: La foto del recibo está borrosa, por favor enviá otra."
+                rows={3}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setEvidenceDialogOpen(false)}>Cancelar</Button>
+              <Button onClick={confirmRequestEvidence}>Enviar solicitud</Button>
             </div>
           </div>
         </DialogContent>

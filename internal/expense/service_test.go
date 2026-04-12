@@ -2,6 +2,7 @@ package expense_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,75 @@ import (
 
 // helper — returns a pointer to the given Status.
 func statusPtr(s expense.Status) *expense.Status { return &s }
+
+// TestCanTransition_NeedsEvidence verifies the new needs_evidence state transitions.
+func TestCanTransition_NeedsEvidence(t *testing.T) {
+	cases := []struct {
+		name string
+		from expense.Status
+		to   expense.Status
+		want bool
+	}{
+		{"confirmed→needs_evidence", expense.StatusConfirmed, expense.StatusNeedsEvidence, true},
+		{"needs_evidence→confirmed", expense.StatusNeedsEvidence, expense.StatusConfirmed, true},
+		{"needs_evidence→rejected", expense.StatusNeedsEvidence, expense.StatusRejected, true},
+		{"needs_evidence→approved", expense.StatusNeedsEvidence, expense.StatusApproved, false},
+		{"needs_evidence→pending", expense.StatusNeedsEvidence, expense.StatusPending, false},
+		{"needs_evidence→needs_evidence", expense.StatusNeedsEvidence, expense.StatusNeedsEvidence, true}, // idempotent
+		{"approved→needs_evidence", expense.StatusApproved, expense.StatusNeedsEvidence, false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			repo := new(expense.MockRepository)
+			svc := expense.NewService(repo)
+
+			expID := uuid.New()
+			ownerID := uuid.New()
+			driverID := uuid.New()
+
+			existing := &expense.Expense{
+				ID:       expID,
+				OwnerID:  ownerID,
+				DriverID: driverID,
+				Status:   tc.from,
+			}
+
+			if tc.to == expense.StatusNeedsEvidence {
+				// Test via RequestEvidence
+				if tc.want {
+					repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
+					repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusNeedsEvidence, (*uuid.UUID)(nil), "request").Return(nil)
+					err := svc.RequestEvidence(context.Background(), expID, ownerID, "request")
+					assert.NoError(t, err)
+				} else {
+					repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
+					err := svc.RequestEvidence(context.Background(), expID, ownerID, "request")
+					assert.ErrorIs(t, err, expense.ErrInvalidTransition)
+				}
+			} else if tc.from == expense.StatusNeedsEvidence && tc.to == expense.StatusConfirmed {
+				// Test via SubmitEvidence
+				if tc.want {
+					receiptID := uuid.New()
+					repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+					repo.On("UpdateReceiptID", context.Background(), expID, receiptID).Return(nil)
+					repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusConfirmed, (*uuid.UUID)(nil), "").Return(nil)
+					err := svc.SubmitEvidence(context.Background(), expID, driverID, receiptID)
+					assert.NoError(t, err)
+				}
+			} else if tc.from == expense.StatusNeedsEvidence && tc.to == expense.StatusRejected {
+				if tc.want {
+					repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
+					repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusRejected, &ownerID, "reason").Return(nil)
+					err := svc.Reject(context.Background(), expID, ownerID, "reason")
+					assert.NoError(t, err)
+				}
+			}
+			repo.AssertExpectations(t)
+		})
+	}
+}
 
 // ----- Task 7.1: unit tests -----
 
@@ -323,6 +393,189 @@ func TestExpenseService_StateMachine_TableTest(t *testing.T) {
 			repo.AssertNotCalled(t, "UpdateStatus")
 		})
 	}
+}
+
+// TestExpenseService_RequestEvidence verifies RequestEvidence behavior.
+func TestExpenseService_RequestEvidence(t *testing.T) {
+	t.Run("happy_path_confirmed_to_needs_evidence", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		confirmed := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusConfirmed}
+
+		repo.On("GetByID", context.Background(), expID, ownerID).Return(confirmed, nil)
+		repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusNeedsEvidence, (*uuid.UUID)(nil), "please re-send receipt").Return(nil)
+
+		err := svc.RequestEvidence(context.Background(), expID, ownerID, "please re-send receipt")
+		require.NoError(t, err)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("re_request_needs_evidence_idempotent", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		needsEvidence := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusNeedsEvidence}
+
+		repo.On("GetByID", context.Background(), expID, ownerID).Return(needsEvidence, nil)
+		repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusNeedsEvidence, (*uuid.UUID)(nil), "some message").Return(nil)
+
+		// Idempotent: re-requesting evidence when already in needs_evidence updates the message.
+		err := svc.RequestEvidence(context.Background(), expID, ownerID, "some message")
+		require.NoError(t, err)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("invalid_status_pending", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		pending := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusPending}
+
+		repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
+
+		err := svc.RequestEvidence(context.Background(), expID, ownerID, "request message")
+		require.ErrorIs(t, err, expense.ErrInvalidTransition)
+		repo.AssertNotCalled(t, "UpdateStatus")
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("not_found", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+
+		repo.On("GetByID", context.Background(), expID, ownerID).Return(nil, expense.ErrNotFound)
+
+		err := svc.RequestEvidence(context.Background(), expID, ownerID, "request message")
+		require.ErrorIs(t, err, expense.ErrNotFound)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("empty_message", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+
+		err := svc.RequestEvidence(context.Background(), expID, ownerID, "")
+		require.ErrorIs(t, err, expense.ErrEvidenceMessageRequired)
+		repo.AssertNotCalled(t, "GetByID")
+		repo.AssertNotCalled(t, "UpdateStatus")
+		repo.AssertExpectations(t)
+	})
+}
+
+// TestExpenseService_SubmitEvidence verifies SubmitEvidence behavior.
+func TestExpenseService_SubmitEvidence(t *testing.T) {
+	t.Run("happy_path_needs_evidence_to_confirmed", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		driverID := uuid.New()
+		receiptID := uuid.New()
+
+		needsEvidence := &expense.Expense{
+			ID:       expID,
+			OwnerID:  ownerID,
+			DriverID: driverID,
+			Status:   expense.StatusNeedsEvidence,
+		}
+
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(needsEvidence, nil)
+		repo.On("UpdateReceiptID", context.Background(), expID, receiptID).Return(nil)
+		repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusConfirmed, (*uuid.UUID)(nil), "").Return(nil)
+
+		err := svc.SubmitEvidence(context.Background(), expID, driverID, receiptID)
+		require.NoError(t, err)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("wrong_driver", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		driverID := uuid.New()
+		wrongDriverID := uuid.New()
+		receiptID := uuid.New()
+
+		needsEvidence := &expense.Expense{
+			ID:       expID,
+			OwnerID:  ownerID,
+			DriverID: driverID,
+			Status:   expense.StatusNeedsEvidence,
+		}
+
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(needsEvidence, nil)
+
+		err := svc.SubmitEvidence(context.Background(), expID, wrongDriverID, receiptID)
+		require.ErrorIs(t, err, expense.ErrNotFound)
+		repo.AssertNotCalled(t, "UpdateReceiptID")
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("invalid_status_confirmed", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		driverID := uuid.New()
+		receiptID := uuid.New()
+
+		confirmed := &expense.Expense{
+			ID:       expID,
+			OwnerID:  ownerID,
+			DriverID: driverID,
+			Status:   expense.StatusConfirmed,
+		}
+
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(confirmed, nil)
+
+		err := svc.SubmitEvidence(context.Background(), expID, driverID, receiptID)
+		require.ErrorIs(t, err, expense.ErrInvalidTransition)
+		repo.AssertNotCalled(t, "UpdateReceiptID")
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("update_receipt_id_error_propagated", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		ownerID := uuid.New()
+		driverID := uuid.New()
+		receiptID := uuid.New()
+		dbErr := errors.New("db error")
+
+		needsEvidence := &expense.Expense{
+			ID:       expID,
+			OwnerID:  ownerID,
+			DriverID: driverID,
+			Status:   expense.StatusNeedsEvidence,
+		}
+
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(needsEvidence, nil)
+		repo.On("UpdateReceiptID", context.Background(), expID, receiptID).Return(dbErr)
+
+		err := svc.SubmitEvidence(context.Background(), expID, driverID, receiptID)
+		require.ErrorIs(t, err, dbErr)
+		repo.AssertNotCalled(t, "UpdateStatus")
+		repo.AssertExpectations(t)
+	})
 }
 
 // TestExpenseService_List_LimitClamping verifies that zero/negative limits default to 20

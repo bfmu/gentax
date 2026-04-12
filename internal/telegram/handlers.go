@@ -224,6 +224,47 @@ func (b *Bot) handleCategorySelection(c tele.Context) error {
 	return c.Send("Enviá una foto de la factura o escribí el monto manualmente (en pesos COP).")
 }
 
+// ─── /soporte ─────────────────────────────────────────────────────────────────
+
+// handleSoporte allows a driver to submit evidence for a needs_evidence expense.
+func (b *Bot) handleSoporte(c tele.Context) error {
+	ctx := context.Background()
+	telegramID := c.Sender().ID
+	cs := b.states.get(telegramID)
+
+	if cs.Claims == nil {
+		return c.Send("Necesitás iniciar sesión primero. Usá /start.")
+	}
+
+	driverID := cs.Claims.DriverID
+	ownerID := cs.Claims.OwnerID
+	needsEvidence := expense.StatusNeedsEvidence
+
+	expenses, err := b.services.Expense.List(ctx, expense.ListFilter{
+		OwnerID:  ownerID,
+		DriverID: &driverID,
+		Status:   &needsEvidence,
+		Limit:    1,
+	})
+	if err != nil || len(expenses) == 0 {
+		return c.Send("No tenés gastos pendientes de evidencia.")
+	}
+
+	exp := expenses[0]
+	expID := exp.ID
+	taxiID := exp.TaxiID
+	cs.PendingExpenseID = &expID
+	cs.SelectedTaxiID = &taxiID
+	cs.State = StateAwaitingEvidencePhoto
+	b.states.set(telegramID, cs)
+
+	msg := "Enviá la foto del comprobante para el gasto pendiente de evidencia."
+	if exp.RejectionReason != "" {
+		msg = fmt.Sprintf("El administrador solicita más evidencia:\n\n%s\n\nEnviá la foto del comprobante.", exp.RejectionReason)
+	}
+	return c.Send(msg)
+}
+
 // handlePhoto processes a receipt photo from the driver.
 // REQ-EXP-03, REQ-FRD-02: upload to storage BEFORE any DB write.
 func (b *Bot) handlePhoto(c tele.Context) error {
@@ -231,7 +272,15 @@ func (b *Bot) handlePhoto(c tele.Context) error {
 	telegramID := c.Sender().ID
 	cs := b.states.get(telegramID)
 
-	if cs.Claims == nil || cs.State != StateAwaitingReceiptPhoto {
+	if cs.Claims == nil {
+		return nil
+	}
+
+	if cs.State == StateAwaitingEvidencePhoto {
+		return b.handleEvidencePhoto(ctx, c, cs)
+	}
+
+	if cs.State != StateAwaitingReceiptPhoto {
 		return nil
 	}
 
@@ -450,6 +499,53 @@ func (b *Bot) handleEstado(c tele.Context) error {
 	return c.Send(sb.String())
 }
 
+// handleEvidencePhoto processes a photo submitted as evidence for a needs_evidence expense.
+func (b *Bot) handleEvidencePhoto(ctx context.Context, c tele.Context, cs *ConversationState) error {
+	telegramID := c.Sender().ID
+
+	photo := c.Message().Photo
+	if photo == nil {
+		return c.Send("No se pudo leer la foto. Intentá de nuevo.")
+	}
+
+	photoBytes, fileID, err := b.downloadPhoto(ctx, c, photo)
+	if err != nil {
+		slog.Error("failed to download evidence photo from telegram", "err", err)
+		return c.Send("No se pudo descargar la foto. Intentá de nuevo.")
+	}
+
+	// Upload to persistent storage FIRST (REQ-FRD-02).
+	storageKey := fmt.Sprintf("receipts/%s/evidence-%s.jpg", cs.Claims.DriverID, uuid.New())
+	storageURL, err := b.services.Storage.Upload(ctx, storageKey, photoBytes, "image/jpeg")
+	if err != nil {
+		slog.Error("failed to upload evidence to storage", "err", err)
+		return c.Send("No se pudo guardar la foto. Intentá de nuevo.")
+	}
+
+	// Create receipt record with ocr_status=skipped (evidence doesn't need OCR).
+	r := &receipt.Receipt{
+		DriverID:       cs.Claims.DriverID,
+		TaxiID:         *cs.SelectedTaxiID,
+		StorageURL:     storageURL,
+		TelegramFileID: fileID,
+		OCRStatus:      receipt.OCRStatusSkipped,
+	}
+	createdReceipt, err := b.services.Receipt.Create(ctx, r)
+	if err != nil {
+		slog.Error("failed to create evidence receipt record", "err", err)
+		return c.Send("Error al registrar el comprobante. Intentá de nuevo.")
+	}
+
+	// Submit evidence — transitions expense back to confirmed.
+	if err := b.services.Expense.SubmitEvidence(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID); err != nil {
+		slog.Error("failed to submit evidence", "err", err)
+		return c.Send("Error al enviar la evidencia. Intentá de nuevo.")
+	}
+
+	b.states.reset(telegramID)
+	return c.Send("Evidencia enviada ✓ El administrador revisará tu gasto.")
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // expenseCategory is a lightweight view used in category selection UI.
@@ -468,12 +564,20 @@ func (b *Bot) getDriverTaxiIDs(ctx context.Context, driverID uuid.UUID) ([]uuid.
 }
 
 // getExpenseCategories returns the expense categories for an owner.
-// Falls back to a stub "General" category if no CategoryLister is available.
 func (b *Bot) getExpenseCategories(ctx context.Context, ownerID uuid.UUID) ([]expenseCategory, error) {
-	if lister, ok := b.services.Expense.(categoryLister); ok {
-		return lister.ListCategories(ctx, ownerID)
+	lister, ok := b.services.Expense.(categoryLister)
+	if !ok {
+		return nil, fmt.Errorf("expense service does not implement ListCategories")
 	}
-	return []expenseCategory{{ID: ownerID, Name: "General"}}, nil
+	cats, err := lister.ListCategories(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]expenseCategory, 0, len(cats))
+	for _, c := range cats {
+		result = append(result, expenseCategory{ID: c.ID, Name: c.Name})
+	}
+	return result, nil
 }
 
 // downloadPhoto downloads the highest-resolution Telegram photo and returns its bytes and file ID.
@@ -505,5 +609,5 @@ func (b *Bot) downloadPhoto(_ context.Context, c tele.Context, photo *tele.Photo
 
 // categoryLister is an optional extension interface for expense.Service.
 type categoryLister interface {
-	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]expenseCategory, error)
+	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*expense.ExpenseCategory, error)
 }

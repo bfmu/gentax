@@ -60,7 +60,7 @@ export default function Expenses() {
             <TableRow key={e.id}>
               <TableCell>{e.driver_name}</TableCell>
               <TableCell>{e.taxi_plate}</TableCell>
-              <TableCell>{e.category}</TableCell>
+              <TableCell>{e.category_name}</TableCell>
               <TableCell>{Number(e.amount).toLocaleString('es-CO')}</TableCell>
               <TableCell className="flex gap-2">
                 <Button size="sm" onClick={() => approve(e.id)}>Aprobar</Button>
