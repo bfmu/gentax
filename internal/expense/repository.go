@@ -92,7 +92,7 @@ func scanExpenseWithDetails(row interface {
 
 const selectExpenseCols = `
 	id, owner_id, driver_id, taxi_id, category_id, receipt_id,
-	amount, expense_date, notes, status, rejection_reason,
+	amount, expense_date, notes, status, COALESCE(rejection_reason, '') AS rejection_reason,
 	reviewed_by, reviewed_at, created_at, updated_at`
 
 // Create inserts a new expense record with status=pending and returns it.
@@ -133,7 +133,7 @@ func (r *pgxRepository) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Ex
 	// Owner path: full JOIN query with enriched fields.
 	const q = `
 		SELECT e.id, e.owner_id, e.driver_id, e.taxi_id, e.category_id, e.receipt_id,
-		       e.amount, e.expense_date, e.notes, e.status, e.rejection_reason,
+		       e.amount, e.expense_date, e.notes, e.status, COALESCE(e.rejection_reason, '') AS rejection_reason,
 		       e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at,
 		       COALESCE(d.full_name, '') AS driver_name,
 		       COALESCE(t.plate, '') AS taxi_plate,
@@ -205,7 +205,7 @@ func (r *pgxRepository) List(ctx context.Context, filter ListFilter) ([]*Expense
 
 	q := fmt.Sprintf(`
 		SELECT e.id, e.owner_id, e.driver_id, e.taxi_id, e.category_id, e.receipt_id,
-		       e.amount, e.expense_date, e.notes, e.status, e.rejection_reason,
+		       e.amount, e.expense_date, e.notes, e.status, COALESCE(e.rejection_reason, '') AS rejection_reason,
 		       e.reviewed_by, e.reviewed_at, e.created_at, e.updated_at,
 		       COALESCE(d.full_name, '') AS driver_name,
 		       COALESCE(t.plate, '') AS taxi_plate,
