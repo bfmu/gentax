@@ -38,6 +38,10 @@ var (
 	ErrInvalidTransition       = errors.New("invalid status transition")
 	ErrEvidenceNotAllowed      = errors.New("expense is not in a state that allows evidence request")
 	ErrEvidenceMessageRequired = errors.New("evidence request message is required")
+	ErrCategoryNotFound        = errors.New("category not found")
+	ErrCategoryInUse           = errors.New("category is in use by existing expenses")
+	ErrCategoryNameRequired    = errors.New("category name is required")
+	ErrCategoryDuplicate       = errors.New("category name already exists")
 )
 
 // Expense represents a taxi fleet expense submitted by a driver.
@@ -116,8 +120,10 @@ type CategorySummary struct {
 
 // ExpenseCategory is a lightweight view of an expense category used in UIs.
 type ExpenseCategory struct {
-	ID   uuid.UUID
-	Name string
+	ID        uuid.UUID `json:"id"`
+	OwnerID   uuid.UUID `json:"owner_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Repository defines the persistence contract for expenses.
@@ -130,6 +136,9 @@ type Repository interface {
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
 	UpdateReceiptID(ctx context.Context, id uuid.UUID, receiptID uuid.UUID) error
 	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
+	CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error)
+	DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error
+	SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)
@@ -147,6 +156,9 @@ type Service interface {
 	GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error)
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
 	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
+	CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error)
+	DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error
+	SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)

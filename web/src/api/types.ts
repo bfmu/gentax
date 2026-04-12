@@ -48,6 +48,13 @@ export interface Expense {
   created_at: string;
 }
 
+export interface Category {
+  id: string;
+  owner_id: string;
+  name: string;
+  created_at: string;
+}
+
 export interface Report {
   taxi_plate?: string;
   driver_name?: string;

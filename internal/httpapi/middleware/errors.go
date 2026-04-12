@@ -74,6 +74,18 @@ func DomainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, expense.ErrEvidenceMessageRequired):
 		WriteError(w, http.StatusBadRequest, err.Error(), "bad_request")
 
+	case errors.Is(err, expense.ErrCategoryNotFound):
+		WriteError(w, http.StatusNotFound, err.Error(), "not_found")
+
+	case errors.Is(err, expense.ErrCategoryInUse):
+		WriteError(w, http.StatusConflict, err.Error(), "category_in_use")
+
+	case errors.Is(err, expense.ErrCategoryNameRequired):
+		WriteError(w, http.StatusBadRequest, err.Error(), "bad_request")
+
+	case errors.Is(err, expense.ErrCategoryDuplicate):
+		WriteError(w, http.StatusConflict, err.Error(), "duplicate")
+
 	default:
 		WriteError(w, http.StatusInternalServerError, "internal server error", "internal_error")
 	}

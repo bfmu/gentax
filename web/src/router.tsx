@@ -8,6 +8,7 @@ import Drivers from '@/pages/Drivers';
 import Expenses from '@/pages/Expenses';
 import ExpenseDetail from '@/pages/ExpenseDetail';
 import Reports from '@/pages/Reports';
+import Categories from '@/pages/Categories';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ export default function AppRouter() {
         <Route path="/expenses" element={<ProtectedRoute><Expenses /></ProtectedRoute>} />
         <Route path="/expenses/:id" element={<ProtectedRoute><ExpenseDetail /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+        <Route path="/categories" element={<ProtectedRoute><Categories /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

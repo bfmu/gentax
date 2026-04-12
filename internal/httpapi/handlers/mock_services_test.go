@@ -158,6 +158,22 @@ func (m *mockExpenseService) ListCategories(ctx context.Context, ownerID uuid.UU
 	return args.Get(0).([]*expense.ExpenseCategory), args.Error(1)
 }
 
+func (m *mockExpenseService) CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*expense.ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*expense.ExpenseCategory), args.Error(1)
+}
+
+func (m *mockExpenseService) DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error {
+	return m.Called(ctx, id, ownerID).Error(0)
+}
+
+func (m *mockExpenseService) SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error {
+	return m.Called(ctx, ownerID).Error(0)
+}
+
 func (m *mockExpenseService) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*expense.TaxiSummary, error) {
 	args := m.Called(ctx, ownerID, from, to)
 	if args.Get(0) == nil {

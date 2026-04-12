@@ -180,6 +180,25 @@ func (s *service) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*Exp
 	return s.repo.ListCategories(ctx, ownerID)
 }
 
+// CreateCategory creates a new expense category for the given owner.
+// Returns ErrCategoryNameRequired if name is blank.
+func (s *service) CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, ErrCategoryNameRequired
+	}
+	return s.repo.CreateCategory(ctx, ownerID, strings.TrimSpace(name))
+}
+
+// DeleteCategory removes an expense category scoped to the owner.
+func (s *service) DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error {
+	return s.repo.DeleteCategory(ctx, id, ownerID)
+}
+
+// SeedDefaultCategories seeds the default expense categories for the given owner.
+func (s *service) SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error {
+	return s.repo.SeedDefaultCategories(ctx, ownerID)
+}
+
 // SumByTaxi returns aggregate totals per taxi for approved expenses in the date range.
 func (s *service) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error) {
 	return s.repo.SumByTaxi(ctx, ownerID, from, to)

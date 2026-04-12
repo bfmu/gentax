@@ -17,15 +17,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const [taxisRes, driversRes, expensesRes] = await Promise.all([
+      const [taxisRes, driversRes, confirmedRes, needsEvidenceRes] = await Promise.all([
         client.get<unknown[]>('/taxis'),
         client.get<unknown[]>('/drivers'),
         client.get<unknown[]>('/expenses?status=confirmed'),
+        client.get<unknown[]>('/expenses?status=needs_evidence'),
       ]);
       setCounts({
         taxis: taxisRes.data?.length ?? 0,
         drivers: driversRes.data?.length ?? 0,
-        pending_expenses: expensesRes.data?.length ?? 0,
+        pending_expenses: (confirmedRes.data?.length ?? 0) + (needsEvidenceRes.data?.length ?? 0),
       });
     }
     load();
@@ -57,6 +58,7 @@ export default function Dashboard() {
         <Link to="/taxis"><Button variant="outline" className="w-full justify-start">Taxis</Button></Link>
         <Link to="/drivers"><Button variant="outline" className="w-full justify-start">Conductores</Button></Link>
         <Link to="/expenses"><Button variant="outline" className="w-full justify-start">Gastos</Button></Link>
+        <Link to="/categories"><Button variant="outline" className="w-full justify-start">Categorías</Button></Link>
         <Link to="/reports"><Button variant="outline" className="w-full justify-start">Reportes</Button></Link>
       </nav>
     </div>

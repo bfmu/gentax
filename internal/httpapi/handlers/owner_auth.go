@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/bmunoz/gentax/internal/auth"
+	"github.com/bmunoz/gentax/internal/expense"
 	"github.com/bmunoz/gentax/internal/owner"
 	mw "github.com/bmunoz/gentax/internal/httpapi/middleware"
 )
@@ -26,11 +28,18 @@ type OwnerAuthHandler struct {
 	svc             OwnerAuthService
 	issuer          auth.TokenIssuer
 	bootstrapSecret string
+	expenseSvc      expense.Service
 }
 
 // NewOwnerAuthHandler constructs an OwnerAuthHandler.
 func NewOwnerAuthHandler(svc OwnerAuthService, issuer auth.TokenIssuer, bootstrapSecret string) *OwnerAuthHandler {
 	return &OwnerAuthHandler{svc: svc, issuer: issuer, bootstrapSecret: bootstrapSecret}
+}
+
+// WithExpenseService sets the optional expense service used to seed default categories on registration.
+func (h *OwnerAuthHandler) WithExpenseService(svc expense.Service) *OwnerAuthHandler {
+	h.expenseSvc = svc
+	return h
 }
 
 type ownerLoginRequest struct {
@@ -153,7 +162,7 @@ func (h *OwnerAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.svc.Create(r.Context(), req.Name, req.Email, req.Password)
+	newOwner, err := h.svc.Create(r.Context(), req.Name, req.Email, req.Password)
 	if err != nil {
 		if errors.Is(err, owner.ErrDuplicateEmail) {
 			mw.WriteError(w, http.StatusConflict, "email already registered", "duplicate_email")
@@ -161,6 +170,12 @@ func (h *OwnerAuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		mw.WriteError(w, http.StatusInternalServerError, "internal server error", "internal_error")
 		return
+	}
+
+	if h.expenseSvc != nil {
+		if err := h.expenseSvc.SeedDefaultCategories(r.Context(), newOwner.ID); err != nil {
+			slog.Warn("failed to seed default categories for new owner", "owner_id", newOwner.ID, "err", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

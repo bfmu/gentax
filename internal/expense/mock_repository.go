@@ -68,6 +68,25 @@ func (m *MockRepository) ListCategories(ctx context.Context, ownerID uuid.UUID) 
 	return args.Get(0).([]*ExpenseCategory), args.Error(1)
 }
 
+// CreateCategory mocks the CreateCategory method.
+func (m *MockRepository) CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ExpenseCategory), args.Error(1)
+}
+
+// DeleteCategory mocks the DeleteCategory method.
+func (m *MockRepository) DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error {
+	return m.Called(ctx, id, ownerID).Error(0)
+}
+
+// SeedDefaultCategories mocks the SeedDefaultCategories method.
+func (m *MockRepository) SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error {
+	return m.Called(ctx, ownerID).Error(0)
+}
+
 // SumByTaxi mocks the SumByTaxi method.
 func (m *MockRepository) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error) {
 	args := m.Called(ctx, ownerID, from, to)

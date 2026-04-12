@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 )
@@ -298,7 +299,8 @@ func (r *pgxRepository) UpdateReceiptID(ctx context.Context, id uuid.UUID, recei
 
 // ListCategories returns all expense categories for the given owner, ordered by name.
 func (r *pgxRepository) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, name FROM expense_categories WHERE owner_id=$1 ORDER BY name`, ownerID)
+	const q = `SELECT id, owner_id, name, created_at FROM expense_categories WHERE owner_id=$1 ORDER BY name`
+	rows, err := r.pool.Query(ctx, q, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -306,12 +308,66 @@ func (r *pgxRepository) ListCategories(ctx context.Context, ownerID uuid.UUID) (
 	var cats []*ExpenseCategory
 	for rows.Next() {
 		var c ExpenseCategory
-		if err := rows.Scan(&c.ID, &c.Name); err != nil {
+		if err := rows.Scan(&c.ID, &c.OwnerID, &c.Name, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		cats = append(cats, &c)
 	}
 	return cats, rows.Err()
+}
+
+// CreateCategory inserts a new expense category for the given owner.
+// Returns ErrCategoryDuplicate if the name already exists for this owner.
+func (r *pgxRepository) CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error) {
+	const q = `INSERT INTO expense_categories(owner_id, name) VALUES($1,$2) RETURNING id, owner_id, name, created_at`
+	var c ExpenseCategory
+	err := r.pool.QueryRow(ctx, q, ownerID, name).Scan(&c.ID, &c.OwnerID, &c.Name, &c.CreatedAt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrCategoryDuplicate
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+// DeleteCategory removes an expense category by ID scoped to the owner.
+// Returns ErrCategoryInUse if expenses reference this category,
+// ErrCategoryNotFound if no matching record exists.
+func (r *pgxRepository) DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error {
+	const q = `DELETE FROM expense_categories WHERE id=$1 AND owner_id=$2`
+	tag, err := r.pool.Exec(ctx, q, id, ownerID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrCategoryInUse
+		}
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrCategoryNotFound
+	}
+	return nil
+}
+
+// defaultCategories are the seed categories created for every new owner.
+var defaultCategories = []string{
+	"Combustible", "Repuestos y mecánica", "Aceite y lubricantes",
+	"Llantas", "Lavado y limpieza", "Peajes", "Multas",
+	"Seguro", "Documentos y trámites", "Otros",
+}
+
+// SeedDefaultCategories inserts the default category list for the given owner.
+// Uses ON CONFLICT DO NOTHING so it is safe to call multiple times.
+func (r *pgxRepository) SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error {
+	const q = `INSERT INTO expense_categories(owner_id, name) VALUES($1,$2) ON CONFLICT (owner_id, name) DO NOTHING`
+	for _, name := range defaultCategories {
+		if _, err := r.pool.Exec(ctx, q, ownerID, name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SumByTaxi returns aggregate approved expense totals per taxi for the given date range.

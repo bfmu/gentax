@@ -63,11 +63,12 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 
 	// Handler instances.
 	authH := handlers.NewAuthHandler(svc.DriverFinder, issuer)
-	ownerAuthH := handlers.NewOwnerAuthHandler(svc.Owner, issuer, svc.BootstrapSecret)
+	ownerAuthH := handlers.NewOwnerAuthHandler(svc.Owner, issuer, svc.BootstrapSecret).WithExpenseService(svc.Expense)
 	taxiH := handlers.NewTaxiHandler(svc.Taxi, svc.Driver)
 	driverH := handlers.NewDriverHandler(svc.Driver)
 	expenseH := handlers.NewExpenseHandler(svc.Expense).WithEvidenceNotifier(svc.EvidenceNotifier)
 	reportH := handlers.NewReportHandler(svc.Expense)
+	catH := handlers.NewCategoryHandler(svc.Expense)
 
 	// Public routes — no JWT required.
 	r.Post("/auth/telegram", authH.TelegramAuth)
@@ -98,6 +99,11 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 		r.Patch("/expenses/{id}/approve", expenseH.Approve)
 		r.Patch("/expenses/{id}/reject", expenseH.Reject)
 		r.Patch("/expenses/{id}/request-evidence", expenseH.RequestEvidence)
+
+		// Category management.
+		r.Get("/categories", catH.List)
+		r.Post("/categories", catH.Create)
+		r.Delete("/categories/{id}", catH.Delete)
 
 		// Reports.
 		r.Get("/reports/expenses", reportH.ExpenseList)
