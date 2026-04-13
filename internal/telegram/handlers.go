@@ -31,11 +31,28 @@ const (
 
 // ─── /start ───────────────────────────────────────────────────────────────────
 
+// persistentMenuKeyboard returns the always-visible reply keyboard shown at the bottom of the chat.
+func persistentMenuKeyboard() *tele.ReplyMarkup {
+	kb := &tele.ReplyMarkup{ResizeKeyboard: true}
+	kb.Reply(
+		kb.Row(kb.Text("📝 Registrar gasto")),
+		kb.Row(kb.Text("📊 Ver mis gastos")),
+		kb.Row(kb.Text("📎 Enviar soporte")),
+	)
+	return kb
+}
+
 // handleStart processes the /start command.
 // REQ-DRV-02: link token flow; REQ-DRV-03: issue JWT.
 func (b *Bot) handleStart(c tele.Context) error {
 	ctx := context.Background()
 	telegramID := c.Sender().ID
+
+	// If already authenticated, just show the persistent keyboard again.
+	cs := b.states.get(telegramID)
+	if cs.Claims != nil {
+		return c.Send("¿Qué querés hacer?", persistentMenuKeyboard())
+	}
 
 	// Check whether a link token was passed as the /start parameter.
 	parts := strings.Fields(c.Text())
@@ -114,8 +131,7 @@ func (b *Bot) issueJWTAndWelcome(_ context.Context, c tele.Context, drv *driver.
 	}
 	b.states.set(c.Sender().ID, cs)
 
-	_ = c.Send(fmt.Sprintf("Bienvenido, %s! Elegí una opción:", drv.FullName))
-	return b.showMainMenu(context.Background(), c, cs)
+	return c.Send(fmt.Sprintf("Bienvenido, %s! Elegí una opción:", drv.FullName), persistentMenuKeyboard())
 }
 
 // ─── main menu ────────────────────────────────────────────────────────────────
@@ -187,15 +203,10 @@ func (b *Bot) handleCallbackOmitir(c tele.Context) error {
 
 // handleCallbackCancelEvidence handles the [❌ Cancelar] button during evidence flow.
 func (b *Bot) handleCallbackCancelEvidence(c tele.Context) error {
-	ctx := context.Background()
 	telegramID := c.Sender().ID
-	cs := b.states.get(telegramID)
 	_ = c.Respond()
 	b.states.reset(telegramID)
-	// Show main menu (use fresh idle cs after reset for privilege check)
-	freshCS := b.states.get(telegramID)
-	freshCS.Claims = cs.Claims // keep claims so menu can check pending
-	return b.showMainMenu(ctx, c, freshCS)
+	return c.Send("Cancelado.", persistentMenuKeyboard())
 }
 
 // ─── /gasto ───────────────────────────────────────────────────────────────────
@@ -445,16 +456,27 @@ func (b *Bot) handleText(c tele.Context) error {
 	cs := b.states.get(telegramID)
 
 	if cs.Claims == nil {
-		return c.Send("No estás autenticado. Enviá /start para iniciar sesión.")
+		return c.Send("No estás autenticado. Pedí al administrador un enlace de activación.")
 	}
 
+	// Route persistent keyboard button taps.
+	switch c.Text() {
+	case "📝 Registrar gasto":
+		return b.handleGasto(c)
+	case "📊 Ver mis gastos":
+		return b.handleEstado(c)
+	case "📎 Enviar soporte":
+		return b.handleSoporte(c)
+	}
+
+	// FSM state routing.
 	switch cs.State {
 	case StateAwaitingReceiptPhoto:
 		return b.handleManualAmount(ctx, c, cs)
 	case StateAwaitingManualAmount:
 		return b.handleManualAmount(ctx, c, cs)
 	default:
-		return b.showMainMenu(ctx, c, cs)
+		return c.Send("Elegí una opción del menú.", persistentMenuKeyboard())
 	}
 }
 
@@ -629,7 +651,6 @@ func statusEmoji(s expense.Status) string {
 // handleOmitir handles /omitir — allows the driver to skip optional evidence submission.
 // Only active in StateAwaitingOptionalEvidence; silently ignored in all other states.
 func (b *Bot) handleOmitir(c tele.Context) error {
-	ctx := context.Background()
 	telegramID := c.Sender().ID
 	cs := b.states.get(telegramID)
 
@@ -637,12 +658,8 @@ func (b *Bot) handleOmitir(c tele.Context) error {
 		return nil
 	}
 
-	savedClaims := cs.Claims
 	b.states.reset(telegramID)
-	_ = c.Send("Gasto registrado ✓")
-	// Show main menu — build minimal cs with claims so menu can check pending evidence
-	freshCS := &ConversationState{State: StateIdle, Claims: savedClaims}
-	return b.showMainMenu(ctx, c, freshCS)
+	return c.Send("Gasto registrado ✓", persistentMenuKeyboard())
 }
 
 // handleOptionalEvidencePhoto processes a photo submitted as optional evidence after OCR confirmation.
