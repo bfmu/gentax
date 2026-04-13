@@ -71,21 +71,13 @@ func (b *Bot) NotifyOCRResult(ctx context.Context, telegramID int64, receiptID u
 
 	// Build summary of extracted fields.
 	var sb strings.Builder
-	sb.WriteString("Factura procesada:\n")
-	if result.Vendor != nil {
-		sb.WriteString(fmt.Sprintf("Proveedor: %s\n", *result.Vendor))
-	}
 	if result.Total != nil {
-		sb.WriteString(fmt.Sprintf("Total: $%s COP\n", *result.Total))
+		sb.WriteString(fmt.Sprintf("Factura procesada ✓\nMonto: $%s COP\n", *result.Total))
+	} else {
+		sb.WriteString("Factura procesada, pero no se pudo leer el monto.\n")
 	}
 	if result.Date != nil {
 		sb.WriteString(fmt.Sprintf("Fecha: %s\n", *result.Date))
-	}
-	if result.NIT != nil {
-		sb.WriteString(fmt.Sprintf("NIT: %s\n", *result.NIT))
-	}
-	if result.CUFE != nil {
-		sb.WriteString(fmt.Sprintf("CUFE: %s\n", *result.CUFE))
 	}
 
 	// Build inline keyboard for confirm / edit.
