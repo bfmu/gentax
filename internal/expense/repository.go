@@ -526,6 +526,65 @@ func (r *pgxRepository) SumByCategory(ctx context.Context, ownerID uuid.UUID, fr
 	return result, nil
 }
 
+// AddAttachment inserts a new attachment record for the given expense and receipt.
+// Returns the created Attachment with StorageURL populated via JOIN.
+func (r *pgxRepository) AddAttachment(ctx context.Context, expenseID, receiptID uuid.UUID, label string) (*Attachment, error) {
+	const q = `
+		INSERT INTO expense_attachments (expense_id, receipt_id, label)
+		VALUES ($1, $2, $3)
+		RETURNING id, expense_id, receipt_id, COALESCE(label, '') AS label, created_at`
+
+	var a Attachment
+	err := r.pool.QueryRow(ctx, q, expenseID, receiptID, label).Scan(
+		&a.ID, &a.ExpenseID, &a.ReceiptID, &a.Label, &a.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate StorageURL via a second query.
+	const urlQ = `SELECT COALESCE(storage_url, '') FROM receipts WHERE id = $1`
+	_ = r.pool.QueryRow(ctx, urlQ, receiptID).Scan(&a.StorageURL)
+
+	return &a, nil
+}
+
+// ListAttachments returns all attachments for the given expense, ordered by created_at ASC.
+// StorageURL is populated via JOIN with the receipts table.
+func (r *pgxRepository) ListAttachments(ctx context.Context, expenseID uuid.UUID) ([]Attachment, error) {
+	const q = `
+		SELECT
+			ea.id,
+			ea.expense_id,
+			ea.receipt_id,
+			COALESCE(ea.label, '') AS label,
+			ea.created_at,
+			COALESCE(r.storage_url, '') AS storage_url
+		FROM expense_attachments ea
+		JOIN receipts r ON r.id = ea.receipt_id
+		WHERE ea.expense_id = $1
+		ORDER BY ea.created_at ASC`
+
+	rows, err := r.pool.Query(ctx, q, expenseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var attachments []Attachment
+	for rows.Next() {
+		var a Attachment
+		if err := rows.Scan(&a.ID, &a.ExpenseID, &a.ReceiptID, &a.Label, &a.CreatedAt, &a.StorageURL); err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return attachments, nil
+}
+
 // mapExpensePgError translates pgx-level errors to domain sentinel errors.
 func mapExpensePgError(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {

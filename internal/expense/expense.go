@@ -44,6 +44,18 @@ var (
 	ErrCategoryDuplicate       = errors.New("category name already exists")
 )
 
+// Attachment represents a photo or document attached to an expense as supporting evidence.
+// Multiple attachments can be linked to a single expense.
+type Attachment struct {
+	ID         uuid.UUID `json:"id"`
+	ExpenseID  uuid.UUID `json:"expense_id"`
+	ReceiptID  uuid.UUID `json:"receipt_id"`
+	Label      string    `json:"label,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	// StorageURL is populated via JOIN with receipts table.
+	StorageURL string `json:"storage_url,omitempty"`
+}
+
 // Expense represents a taxi fleet expense submitted by a driver.
 type Expense struct {
 	ID              uuid.UUID        `json:"id"`
@@ -144,6 +156,8 @@ type Repository interface {
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)
+	AddAttachment(ctx context.Context, expenseID, receiptID uuid.UUID, label string) (*Attachment, error)
+	ListAttachments(ctx context.Context, expenseID uuid.UUID) ([]Attachment, error)
 }
 
 // Service exposes business operations on expenses.
@@ -167,4 +181,6 @@ type Service interface {
 	SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*TaxiSummary, error)
 	SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*DriverSummary, error)
 	SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error)
+	AddAttachment(ctx context.Context, expenseID, driverID uuid.UUID, receiptID uuid.UUID, label string) error
+	ListAttachments(ctx context.Context, expenseID, ownerID uuid.UUID) ([]Attachment, error)
 }

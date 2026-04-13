@@ -45,6 +45,7 @@ type Services struct {
 //   - POST       /drivers/{id}/link-token
 //   - GET        /expenses
 //   - GET        /expenses/{id}
+//   - GET        /expenses/{id}/attachments
 //   - PATCH      /expenses/{id}/approve
 //   - PATCH      /expenses/{id}/reject
 //   - GET        /reports/expenses
@@ -54,6 +55,7 @@ type Services struct {
 //
 // Protected routes (require valid JWT, role=driver):
 //   - POST /expenses
+//   - POST /expenses/{id}/attachments
 func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 	r := chi.NewRouter()
 
@@ -100,6 +102,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 		r.Get("/expenses", expenseH.List)
 		r.Get("/expenses/{id}", expenseH.GetByID)
 		r.Get("/expenses/{id}/receipt", expenseH.ReceiptProxy)
+		r.Get("/expenses/{id}/attachments", expenseH.ListAttachments)
 		r.Patch("/expenses/{id}/approve", expenseH.Approve)
 		r.Patch("/expenses/{id}/reject", expenseH.Reject)
 		r.Patch("/expenses/{id}/request-evidence", expenseH.RequestEvidence)
@@ -122,6 +125,8 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 
 		// Expense submission.
 		r.Post("/expenses", expenseH.Create)
+		// Attachment submission (driver adds extra evidence photos).
+		r.Post("/expenses/{id}/attachments", expenseH.AddAttachment)
 	})
 
 	return r

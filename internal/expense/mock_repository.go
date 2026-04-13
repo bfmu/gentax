@@ -128,3 +128,21 @@ func (m *MockRepository) SumByCategory(ctx context.Context, ownerID uuid.UUID, f
 	}
 	return args.Get(0).([]*CategorySummary), args.Error(1)
 }
+
+// AddAttachment mocks the AddAttachment method.
+func (m *MockRepository) AddAttachment(ctx context.Context, expenseID, receiptID uuid.UUID, label string) (*Attachment, error) {
+	args := m.Called(ctx, expenseID, receiptID, label)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*Attachment), args.Error(1)
+}
+
+// ListAttachments mocks the ListAttachments method.
+func (m *MockRepository) ListAttachments(ctx context.Context, expenseID uuid.UUID) ([]Attachment, error) {
+	args := m.Called(ctx, expenseID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]Attachment), args.Error(1)
+}

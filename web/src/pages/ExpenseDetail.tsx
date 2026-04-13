@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import client from '@/api/client';
-import type { Expense } from '@/api/types';
+import type { Expense, Attachment } from '@/api/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -37,6 +37,7 @@ export default function ExpenseDetail() {
   const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false);
   const [evidenceMessage, setEvidenceMessage] = useState('');
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   async function load() {
     try {
@@ -52,6 +53,13 @@ export default function ExpenseDetail() {
   }
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    client.get<Attachment[]>(`/expenses/${id}/attachments`)
+      .then(res => setAttachments(res.data ?? []))
+      .catch(() => setAttachments([]));
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -173,6 +181,92 @@ export default function ExpenseDetail() {
           }
         </CardContent>
       </Card>
+
+      {/* OCR extracted data */}
+      {(() => {
+        if (!expense.ocr_raw) return null;
+        let ocrFields: { nit?: string | null; cufe?: string | null; total?: string | null; date?: string | null; vendor?: string | null } = {};
+        try {
+          const parsed = JSON.parse(expense.ocr_raw);
+          ocrFields = parsed?.fields ?? {};
+        } catch {
+          return null;
+        }
+        const hasAny = ocrFields.vendor != null || ocrFields.nit != null || ocrFields.total != null || ocrFields.date != null || ocrFields.cufe != null;
+        return (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Datos OCR</CardTitle></CardHeader>
+            <CardContent>
+              {hasAny ? (
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  {ocrFields.vendor != null && (
+                    <div>
+                      <p className="text-muted-foreground">Proveedor</p>
+                      <p className="font-medium">{ocrFields.vendor}</p>
+                    </div>
+                  )}
+                  {ocrFields.nit != null && (
+                    <div>
+                      <p className="text-muted-foreground">NIT</p>
+                      <p className="font-medium">{ocrFields.nit}</p>
+                    </div>
+                  )}
+                  {ocrFields.total != null && (
+                    <div>
+                      <p className="text-muted-foreground">Total extraído</p>
+                      <p className="font-medium">{ocrFields.total}</p>
+                    </div>
+                  )}
+                  {ocrFields.date != null && (
+                    <div>
+                      <p className="text-muted-foreground">Fecha</p>
+                      <p className="font-medium">{ocrFields.date}</p>
+                    </div>
+                  )}
+                  {ocrFields.cufe != null && (
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">CUFE</p>
+                      <p className="font-medium break-all">{ocrFields.cufe}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">OCR no encontró datos en el recibo.</p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* Extra attachments (multi-evidence) */}
+      {attachments.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Soportes adjuntos ({attachments.length})</CardTitle></CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {attachments.map((att) => (
+                <div key={att.id} className="flex items-center justify-between border rounded p-3 text-sm">
+                  <div>
+                    <p className="font-medium">{att.label || 'Soporte'}</p>
+                    <p className="text-muted-foreground text-xs">
+                      {new Date(att.created_at).toLocaleDateString('es-CO')}
+                    </p>
+                  </div>
+                  {att.storage_url && (
+                    <a
+                      href={att.storage_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="outline" size="sm">Ver</Button>
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {(expense.status === 'confirmed' || expense.status === 'pending' || expense.status === 'needs_evidence') && (
         <div className="flex gap-3">

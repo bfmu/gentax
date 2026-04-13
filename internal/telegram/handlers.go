@@ -22,6 +22,11 @@ const (
 	callbackSelectCategory = "select_category"
 	callbackConfirmOCR     = "confirm_ocr"
 	callbackEditAmount     = "edit_amount"
+	callbackNewExpense     = "new_expense"
+	callbackViewStatus     = "view_status"
+	callbackSendEvidence   = "send_evidence"
+	callbackOmitir         = "omitir"
+	callbackCancelEvidence = "cancel_evidence"
 )
 
 // ─── /start ───────────────────────────────────────────────────────────────────
@@ -109,7 +114,88 @@ func (b *Bot) issueJWTAndWelcome(_ context.Context, c tele.Context, drv *driver.
 	}
 	b.states.set(c.Sender().ID, cs)
 
-	return c.Send(fmt.Sprintf("Bienvenido, %s! Usá /gasto para registrar un gasto.", drv.FullName))
+	_ = c.Send(fmt.Sprintf("Bienvenido, %s! Elegí una opción:", drv.FullName))
+	return b.showMainMenu(context.Background(), c, cs)
+}
+
+// ─── main menu ────────────────────────────────────────────────────────────────
+
+// showMainMenu sends the inline main menu keyboard.
+// It conditionally includes the [📎 Enviar soporte] button when the driver has
+// at least one needs_evidence expense.
+func (b *Bot) showMainMenu(ctx context.Context, c tele.Context, cs *ConversationState) error {
+	newExpenseBtn := tele.Btn{Unique: callbackNewExpense, Text: "📝 Registrar gasto"}
+	viewStatusBtn := tele.Btn{Unique: callbackViewStatus, Text: "📊 Ver mis gastos"}
+
+	rows := []tele.Row{
+		{newExpenseBtn},
+		{viewStatusBtn},
+	}
+
+	// Only show evidence button if there is a pending expense.
+	if cs != nil && cs.Claims != nil {
+		driverID := cs.Claims.DriverID
+		ownerID := cs.Claims.OwnerID
+		pending, err := b.services.Expense.List(ctx, expense.ListFilter{
+			OwnerID:  ownerID,
+			DriverID: &driverID,
+			Statuses: []expense.Status{expense.StatusNeedsEvidence},
+			Limit:    1,
+		})
+		if err == nil && len(pending) > 0 {
+			evidenceBtn := tele.Btn{Unique: callbackSendEvidence, Text: "📎 Enviar soporte"}
+			rows = append(rows, tele.Row{evidenceBtn})
+		}
+	}
+
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(rows...)
+	return c.Send("¿Qué querés hacer?", kb)
+}
+
+// omitirDoneKeyboard returns a single-button inline keyboard with "Listo" to finish evidence.
+func omitirDoneKeyboard() *tele.ReplyMarkup {
+	btn := tele.Btn{Unique: callbackOmitir, Text: "✅ Listo, no agrego más soportes"}
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(tele.Row{btn})
+	return kb
+}
+
+// handleCallbackNewExpense handles the [📝 Registrar gasto] button.
+func (b *Bot) handleCallbackNewExpense(c tele.Context) error {
+	_ = c.Respond()
+	return b.handleGasto(c)
+}
+
+// handleCallbackViewStatus handles the [📊 Ver mis gastos] button.
+func (b *Bot) handleCallbackViewStatus(c tele.Context) error {
+	_ = c.Respond()
+	return b.handleEstado(c)
+}
+
+// handleCallbackSendEvidence handles the [📎 Enviar soporte] button.
+func (b *Bot) handleCallbackSendEvidence(c tele.Context) error {
+	_ = c.Respond()
+	return b.handleSoporte(c)
+}
+
+// handleCallbackOmitir handles the [✅ Listo, no agrego más soportes] button.
+func (b *Bot) handleCallbackOmitir(c tele.Context) error {
+	_ = c.Respond()
+	return b.handleOmitir(c)
+}
+
+// handleCallbackCancelEvidence handles the [❌ Cancelar] button during evidence flow.
+func (b *Bot) handleCallbackCancelEvidence(c tele.Context) error {
+	ctx := context.Background()
+	telegramID := c.Sender().ID
+	cs := b.states.get(telegramID)
+	_ = c.Respond()
+	b.states.reset(telegramID)
+	// Show main menu (use fresh idle cs after reset for privilege check)
+	freshCS := b.states.get(telegramID)
+	freshCS.Claims = cs.Claims // keep claims so menu can check pending
+	return b.showMainMenu(ctx, c, freshCS)
 }
 
 // ─── /gasto ───────────────────────────────────────────────────────────────────
@@ -260,7 +346,11 @@ func (b *Bot) handleSoporte(c tele.Context) error {
 	if exp.RejectionReason != "" {
 		msg = fmt.Sprintf("El administrador solicita más evidencia:\n\n%s\n\nEnviá la foto del comprobante.", exp.RejectionReason)
 	}
-	return c.Send(msg)
+
+	cancelBtn := tele.Btn{Unique: callbackCancelEvidence, Text: "❌ Cancelar"}
+	kb := &tele.ReplyMarkup{}
+	kb.Inline(tele.Row{cancelBtn})
+	return c.Send(msg, kb)
 }
 
 // handlePhoto processes a receipt photo from the driver.
@@ -364,7 +454,7 @@ func (b *Bot) handleText(c tele.Context) error {
 	case StateAwaitingManualAmount:
 		return b.handleManualAmount(ctx, c, cs)
 	default:
-		return c.Send("Comandos disponibles:\n/gasto — Registrar un gasto\n/estado — Ver tus últimos gastos\n/soporte — Enviar evidencia pendiente\n/omitir — Omitir evidencia opcional")
+		return b.showMainMenu(ctx, c, cs)
 	}
 }
 
@@ -449,7 +539,7 @@ func (b *Bot) handleConfirmOCR(c tele.Context) error {
 	cs.State = StateAwaitingOptionalEvidence
 	b.states.set(telegramID, cs)
 	_ = c.Respond()
-	return c.Send("Gasto confirmado ✓\n\nSi querés adjuntar una foto adicional como evidencia, enviala ahora. O usá /omitir para terminar.")
+	return c.Send("Gasto confirmado ✓\n\nSi querés adjuntar una foto adicional como evidencia, enviala ahora. O tocá el botón para terminar.", omitirDoneKeyboard())
 }
 
 // handleEditAmount processes the "Corregir monto" callback.
@@ -498,21 +588,48 @@ func (b *Bot) handleEstado(c tele.Context) error {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Tus últimos gastos:\n\n")
-	for _, exp := range expenses {
+	sb.WriteString("📋 Tus últimos gastos:\n\n")
+	for i, exp := range expenses {
 		date := exp.CreatedAt.Format("02/01/2006")
 		amount := "—"
 		if exp.Amount != nil {
 			amount = "$" + exp.Amount.StringFixed(0)
 		}
-		sb.WriteString(fmt.Sprintf("%s | %s | %s\n", date, amount, string(exp.Status)))
+		statusLabel := statusEmoji(exp.Status)
+		categoryName := ""
+		if exp.CategoryName != "" {
+			categoryName = exp.CategoryName
+		} else {
+			categoryName = string(exp.Status)
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s — %s — %s — %s\n", i+1, categoryName, amount, statusLabel, date))
 	}
-	return c.Send(sb.String())
+	_ = c.Send(sb.String())
+	return b.showMainMenu(ctx, c, cs)
+}
+
+// statusEmoji returns a display label (with emoji) for an expense status.
+func statusEmoji(s expense.Status) string {
+	switch s {
+	case expense.StatusPending:
+		return "⏳ Pendiente"
+	case expense.StatusConfirmed:
+		return "✅ Confirmado"
+	case expense.StatusNeedsEvidence:
+		return "📎 Necesita evidencia"
+	case expense.StatusApproved:
+		return "✓ Aprobado"
+	case expense.StatusRejected:
+		return "❌ Rechazado"
+	default:
+		return string(s)
+	}
 }
 
 // handleOmitir handles /omitir — allows the driver to skip optional evidence submission.
 // Only active in StateAwaitingOptionalEvidence; silently ignored in all other states.
 func (b *Bot) handleOmitir(c tele.Context) error {
+	ctx := context.Background()
 	telegramID := c.Sender().ID
 	cs := b.states.get(telegramID)
 
@@ -520,15 +637,19 @@ func (b *Bot) handleOmitir(c tele.Context) error {
 		return nil
 	}
 
+	savedClaims := cs.Claims
 	b.states.reset(telegramID)
-	return c.Send("Evidencia omitida. Tu gasto quedó registrado.")
+	_ = c.Send("Gasto registrado ✓")
+	// Show main menu — build minimal cs with claims so menu can check pending evidence
+	freshCS := &ConversationState{State: StateIdle, Claims: savedClaims}
+	return b.showMainMenu(ctx, c, freshCS)
 }
 
 // handleOptionalEvidencePhoto processes a photo submitted as optional evidence after OCR confirmation.
-// Attaches the receipt to the expense via AttachOptionalEvidence (no status change) then resets FSM.
+// Attaches the receipt to the expense via AddAttachment (no status change) then stays in
+// StateAwaitingOptionalEvidence, allowing the driver to add more photos.
+// The driver uses /omitir to finish.
 func (b *Bot) handleOptionalEvidencePhoto(ctx context.Context, c tele.Context, cs *ConversationState) error {
-	telegramID := c.Sender().ID
-
 	photo := c.Message().Photo
 	if photo == nil {
 		return c.Send("No se pudo leer la foto. Intentá de nuevo o usá /omitir.")
@@ -560,13 +681,21 @@ func (b *Bot) handleOptionalEvidencePhoto(ctx context.Context, c tele.Context, c
 		return c.Send("Error al registrar el comprobante. Intentá de nuevo.")
 	}
 
+	// Also keep backward-compat by updating the primary receipt on the expense.
 	if err := b.services.Expense.AttachOptionalEvidence(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID); err != nil {
-		slog.Error("failed to attach optional evidence", "err", err)
+		slog.Error("failed to attach optional evidence (primary)", "err", err)
 		return c.Send("Error al adjuntar la evidencia. Intentá de nuevo.")
 	}
 
-	b.states.reset(telegramID)
-	return c.Send("Evidencia adjuntada ✓")
+	// Also record in the multi-attachment table (label left empty for optional evidence).
+	if err := b.services.Expense.AddAttachment(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID, ""); err != nil {
+		slog.Error("failed to add attachment record", "err", err)
+		// Non-fatal: primary attachment succeeded, log and continue.
+	}
+
+	// Stay in StateAwaitingOptionalEvidence so the driver can add more photos.
+	// State is already set; no change needed.
+	return c.Send("Soporte adjuntado ✅. ¿Querés agregar otro soporte? Enviá otra foto o tocá el botón para terminar.", omitirDoneKeyboard())
 }
 
 // handleEvidencePhoto processes a photo submitted as evidence for a needs_evidence expense.
@@ -612,8 +741,16 @@ func (b *Bot) handleEvidencePhoto(ctx context.Context, c tele.Context, cs *Conve
 		return c.Send("Error al enviar la evidencia. Intentá de nuevo.")
 	}
 
-	b.states.reset(telegramID)
-	return c.Send("Evidencia enviada ✓ El administrador revisará tu gasto.")
+	// Also record in the multi-attachment table.
+	if err := b.services.Expense.AddAttachment(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID, "Soporte requerido"); err != nil {
+		slog.Error("failed to add attachment record for evidence photo", "err", err)
+		// Non-fatal: primary submission succeeded.
+	}
+
+	// Transition to optional evidence state so the driver can add more photos.
+	cs.State = StateAwaitingOptionalEvidence
+	b.states.set(telegramID, cs)
+	return c.Send("Evidencia enviada ✓ El administrador revisará tu gasto.\n\n¿Querés adjuntar otro soporte? Enviá otra foto o tocá el botón para terminar.", omitirDoneKeyboard())
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

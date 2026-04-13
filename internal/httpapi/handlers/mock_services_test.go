@@ -213,6 +213,19 @@ func (m *mockExpenseService) SumByCategory(ctx context.Context, ownerID uuid.UUI
 	return args.Get(0).([]*expense.CategorySummary), args.Error(1)
 }
 
+func (m *mockExpenseService) AddAttachment(ctx context.Context, expenseID, driverID uuid.UUID, receiptID uuid.UUID, label string) error {
+	args := m.Called(ctx, expenseID, driverID, receiptID, label)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) ListAttachments(ctx context.Context, expenseID, ownerID uuid.UUID) ([]expense.Attachment, error) {
+	args := m.Called(ctx, expenseID, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]expense.Attachment), args.Error(1)
+}
+
 // ----- mock StorageReader -----
 
 type mockStorageReader struct{ mock.Mock }

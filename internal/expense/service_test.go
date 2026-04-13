@@ -805,3 +805,165 @@ func TestExpenseService_SumByCategory(t *testing.T) {
 	assert.Equal(t, expected, got)
 	repo.AssertExpectations(t)
 }
+
+// ── AddAttachment tests ─────────────────────────────────────────────────────
+
+// TestExpenseService_AddAttachment_Success verifies that a driver can add an attachment
+// to their own expense and the repository receives the correct parameters.
+func TestExpenseService_AddAttachment_Success(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	driverID := uuid.New()
+	ownerID := uuid.New()
+	receiptID := uuid.New()
+	label := "Factura"
+
+	existing := &expense.Expense{
+		ID:       expID,
+		OwnerID:  ownerID,
+		DriverID: driverID,
+		Status:   expense.StatusPending,
+	}
+
+	attachment := &expense.Attachment{
+		ID:        uuid.New(),
+		ExpenseID: expID,
+		ReceiptID: receiptID,
+		Label:     label,
+	}
+
+	repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+	repo.On("AddAttachment", context.Background(), expID, receiptID, label).Return(attachment, nil)
+
+	err := svc.AddAttachment(context.Background(), expID, driverID, receiptID, label)
+
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+}
+
+// TestExpenseService_AddAttachment_WrongDriver verifies that a driver cannot attach
+// evidence to another driver's expense.
+func TestExpenseService_AddAttachment_WrongDriver(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	driverID := uuid.New()
+	otherDriverID := uuid.New()
+	ownerID := uuid.New()
+
+	existing := &expense.Expense{
+		ID:       expID,
+		OwnerID:  ownerID,
+		DriverID: otherDriverID, // different driver
+		Status:   expense.StatusPending,
+	}
+
+	repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+
+	err := svc.AddAttachment(context.Background(), expID, driverID, uuid.New(), "label")
+
+	require.ErrorIs(t, err, expense.ErrNotFound)
+	repo.AssertNotCalled(t, "AddAttachment")
+	repo.AssertExpectations(t)
+}
+
+// TestExpenseService_AddAttachment_ExpenseNotFound verifies that attaching to a non-existent
+// expense returns ErrNotFound.
+func TestExpenseService_AddAttachment_ExpenseNotFound(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	driverID := uuid.New()
+
+	repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(nil, expense.ErrNotFound)
+
+	err := svc.AddAttachment(context.Background(), expID, driverID, uuid.New(), "")
+
+	require.ErrorIs(t, err, expense.ErrNotFound)
+	repo.AssertNotCalled(t, "AddAttachment")
+	repo.AssertExpectations(t)
+}
+
+// ── ListAttachments tests ───────────────────────────────────────────────────
+
+// TestExpenseService_ListAttachments_Success verifies that attachments are returned
+// when the expense belongs to the requesting owner.
+func TestExpenseService_ListAttachments_Success(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+	driverID := uuid.New()
+
+	existing := &expense.Expense{
+		ID:       expID,
+		OwnerID:  ownerID,
+		DriverID: driverID,
+		Status:   expense.StatusPending,
+	}
+
+	expected := []expense.Attachment{
+		{ID: uuid.New(), ExpenseID: expID, ReceiptID: uuid.New(), Label: "Factura", StorageURL: "http://storage/1.jpg"},
+		{ID: uuid.New(), ExpenseID: expID, ReceiptID: uuid.New(), Label: "Foto soporte", StorageURL: "http://storage/2.jpg"},
+	}
+
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
+	repo.On("ListAttachments", context.Background(), expID).Return(expected, nil)
+
+	got, err := svc.ListAttachments(context.Background(), expID, ownerID)
+
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+	assert.Equal(t, expected, got)
+	repo.AssertExpectations(t)
+}
+
+// TestExpenseService_ListAttachments_WrongOwner verifies that an owner cannot list
+// attachments for another owner's expense (returns ErrNotFound).
+func TestExpenseService_ListAttachments_WrongOwner(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(nil, expense.ErrNotFound)
+
+	got, err := svc.ListAttachments(context.Background(), expID, ownerID)
+
+	require.ErrorIs(t, err, expense.ErrNotFound)
+	assert.Nil(t, got)
+	repo.AssertNotCalled(t, "ListAttachments")
+	repo.AssertExpectations(t)
+}
+
+// TestExpenseService_ListAttachments_Empty verifies that an empty slice is returned
+// when there are no attachments (not nil).
+func TestExpenseService_ListAttachments_Empty(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+
+	existing := &expense.Expense{
+		ID:      expID,
+		OwnerID: ownerID,
+		Status:  expense.StatusPending,
+	}
+
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
+	repo.On("ListAttachments", context.Background(), expID).Return([]expense.Attachment{}, nil)
+
+	got, err := svc.ListAttachments(context.Background(), expID, ownerID)
+
+	require.NoError(t, err)
+	assert.NotNil(t, got)
+	assert.Len(t, got, 0)
+	repo.AssertExpectations(t)
+}

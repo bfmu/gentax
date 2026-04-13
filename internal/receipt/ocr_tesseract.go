@@ -63,12 +63,37 @@ var (
 	// CUFE: 96-character hex string (DIAN electronic invoice unique code).
 	reCUFE = regexp.MustCompile(`\b([0-9a-fA-F]{96})\b`)
 
-	// Total: "TOTAL" label (optionally with IVA/INCLUIDO etc.) followed by optional $ or COP and digits.
-	reTotal = regexp.MustCompile(`(?i)\bTOTAL[^\n$0-9]*[\$COP\s]*([0-9][0-9.,]*)`)
+	// Total: "TOTAL", "VALOR TOTAL", "TOTAL A PAGAR", "TOTAL FACTURA" etc. followed by optional $ or COP and digits.
+	reTotal = regexp.MustCompile(`(?i)\b(?:VALOR\s+)?TOTAL(?:\s+(?:A\s+PAGAR|FACTURA|INCLUIDO|IVA|VENTA))?[^\n$0-9]*[\$COP\s]*([0-9][0-9.,]*)`)
 
 	// Date: DD/MM/YYYY or YYYY-MM-DD.
 	reDate = regexp.MustCompile(`\b(\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})\b`)
 )
+
+// normalizeColombianNumber converts a Colombian-formatted number string to a
+// plain decimal string suitable for decimal.NewFromString.
+//
+// Colombian format rules:
+//   - '.' is thousands separator (e.g. "12.500" = 12500)
+//   - ',' is decimal separator  (e.g. "12.500,50" = 12500.50)
+func normalizeColombianNumber(s string) string {
+	hasDot := strings.ContainsRune(s, '.')
+	hasComma := strings.ContainsRune(s, ',')
+
+	switch {
+	case hasDot && hasComma:
+		// e.g. "1.234.567,89" → "1234567.89"
+		s = strings.ReplaceAll(s, ".", "")
+		s = strings.ReplaceAll(s, ",", ".")
+	case hasDot:
+		// e.g. "12.500" → "12500" (thousands separator only)
+		s = strings.ReplaceAll(s, ".", "")
+	case hasComma:
+		// e.g. "12,500" — treat comma as decimal separator
+		s = strings.ReplaceAll(s, ",", ".")
+	}
+	return s
+}
 
 // parseOCRText parses DIAN fields from raw Tesseract text output.
 func parseOCRText(text string) *OCRResult {
@@ -87,7 +112,7 @@ func parseOCRText(text string) *OCRResult {
 
 	// Total.
 	if m := reTotal.FindStringSubmatch(text); len(m) > 1 {
-		v := strings.TrimSpace(m[1])
+		v := normalizeColombianNumber(strings.TrimSpace(m[1]))
 		result.Total = &v
 	}
 

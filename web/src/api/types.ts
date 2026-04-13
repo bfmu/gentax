@@ -48,6 +48,15 @@ export interface Expense {
   created_at: string;
 }
 
+export interface Attachment {
+  id: string;
+  expense_id: string;
+  receipt_id: string;
+  label?: string;
+  storage_url?: string;
+  created_at: string;
+}
+
 export interface Category {
   id: string;
   owner_id: string;

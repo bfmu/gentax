@@ -338,6 +338,79 @@ func parseListFilter(r *http.Request, ownerID uuid.UUID) (expense.ListFilter, er
 	return filter, nil
 }
 
+// addAttachmentRequest is the request body for POST /expenses/{id}/attachments.
+type addAttachmentRequest struct {
+	ReceiptID uuid.UUID `json:"receipt_id"`
+	Label     string    `json:"label"`
+}
+
+// ListAttachments handles GET /expenses/{id}/attachments (role=admin).
+// Returns all attachments for the expense, including storage URLs.
+func (h *ExpenseHandler) ListAttachments(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		mw.WriteError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid expense id", "bad_request")
+		return
+	}
+
+	attachments, err := h.expenseSvc.ListAttachments(r.Context(), id, claims.OwnerID)
+	if err != nil {
+		mw.DomainError(w, err)
+		return
+	}
+
+	// Return empty array rather than null when there are no attachments.
+	if attachments == nil {
+		attachments = []expense.Attachment{}
+	}
+	writeJSON(w, http.StatusOK, attachments)
+}
+
+// AddAttachment handles POST /expenses/{id}/attachments (role=driver).
+// Attaches an already-uploaded receipt to the expense as additional evidence.
+func (h *ExpenseHandler) AddAttachment(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		mw.WriteError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	if claims.DriverID == nil {
+		mw.WriteError(w, http.StatusForbidden, "forbidden: not a driver", "forbidden")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid expense id", "bad_request")
+		return
+	}
+
+	var req addAttachmentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid request body", "bad_request")
+		return
+	}
+
+	if req.ReceiptID == uuid.Nil {
+		mw.DomainError(w, expense.ErrReceiptRequired)
+		return
+	}
+
+	if err := h.expenseSvc.AddAttachment(r.Context(), id, *claims.DriverID, req.ReceiptID, req.Label); err != nil {
+		mw.DomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "attached"})
+}
+
 // ReceiptProxy handles GET /expenses/{id}/receipt.
 // It fetches the storage URL from the service layer, then reads the bytes (via StorageReader
 // for file:// paths or direct HTTP for cloud URLs) and pipes them to the client.

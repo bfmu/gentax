@@ -242,3 +242,27 @@ func (s *service) SumByDriver(ctx context.Context, ownerID uuid.UUID, from, to t
 func (s *service) SumByCategory(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*CategorySummary, error) {
 	return s.repo.SumByCategory(ctx, ownerID, from, to)
 }
+
+// AddAttachment attaches a receipt to an existing expense as additional evidence.
+// Only the driver who owns the expense may attach evidence.
+// Keeps backward-compat: does not change the expense's primary receipt_id.
+func (s *service) AddAttachment(ctx context.Context, expenseID, driverID uuid.UUID, receiptID uuid.UUID, label string) error {
+	exp, err := s.repo.GetByID(ctx, expenseID, uuid.Nil) // driver path: skip owner filter
+	if err != nil {
+		return err
+	}
+	if exp.DriverID != driverID {
+		return ErrNotFound
+	}
+	_, err = s.repo.AddAttachment(ctx, expenseID, receiptID, label)
+	return err
+}
+
+// ListAttachments returns all attachments for the given expense, scoped to ownerID.
+func (s *service) ListAttachments(ctx context.Context, expenseID, ownerID uuid.UUID) ([]Attachment, error) {
+	// Verify the expense belongs to the owner.
+	if _, err := s.repo.GetByID(ctx, expenseID, ownerID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListAttachments(ctx, expenseID)
+}

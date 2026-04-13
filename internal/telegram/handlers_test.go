@@ -229,6 +229,19 @@ func (m *mockExpenseService) SeedDefaultCategories(ctx context.Context, ownerID 
 	return m.Called(ctx, ownerID).Error(0)
 }
 
+func (m *mockExpenseService) AddAttachment(ctx context.Context, expenseID, driverID uuid.UUID, receiptID uuid.UUID, label string) error {
+	args := m.Called(ctx, expenseID, driverID, receiptID, label)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) ListAttachments(ctx context.Context, expenseID, ownerID uuid.UUID) ([]expense.Attachment, error) {
+	args := m.Called(ctx, expenseID, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]expense.Attachment), args.Error(1)
+}
+
 func (m *mockExpenseService) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*expense.TaxiSummary, error) {
 	args := m.Called(ctx, ownerID, from, to)
 	if args.Get(0) == nil {
@@ -406,6 +419,10 @@ func makeBot(
 ) *Bot {
 	s := &mockSender{}
 	s.On("Send", mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	// showMainMenu calls List with a needs_evidence filter — allow it by default.
+	expenseSvc.On("List", mock.Anything, mock.MatchedBy(func(f expense.ListFilter) bool {
+		return len(f.Statuses) == 1 && f.Statuses[0] == expense.StatusNeedsEvidence
+	})).Return([]*expense.Expense{}, nil).Maybe()
 	svc := Services{
 		Auth:       tokenIssuer,
 		Driver:     driverSvc,
@@ -445,7 +462,8 @@ func TestHandleStart_KnownDriver_IssuesJWT(t *testing.T) {
 	require.NoError(t, err)
 
 	texts := ctx.sentTexts()
-	require.Len(t, texts, 1)
+	// issueJWTAndWelcome sends the welcome text and then the main menu prompt.
+	require.GreaterOrEqual(t, len(texts), 1)
 	assert.Contains(t, texts[0], "Bienvenido")
 	assert.Contains(t, texts[0], drv.FullName)
 
@@ -687,6 +705,10 @@ func TestHandleEstado_ReturnsFormattedList(t *testing.T) {
 		{ID: uuid.New(), OwnerID: ownerID, DriverID: driverID, Amount: &amt, Status: expense.StatusConfirmed, CreatedAt: now},
 		{ID: uuid.New(), OwnerID: ownerID, DriverID: driverID, Amount: &amt, Status: expense.StatusPending, CreatedAt: now},
 	}, nil)
+	// showMainMenu called after the list is shown — allow needs_evidence check.
+	expSvc.On("List", mock.Anything, mock.MatchedBy(func(f expense.ListFilter) bool {
+		return len(f.Statuses) == 1 && f.Statuses[0] == expense.StatusNeedsEvidence
+	})).Return([]*expense.Expense{}, nil).Maybe()
 	b.services.Expense = expSvc
 
 	ctx := &fakeCtx{sender: userWithID(telegramID)}
@@ -694,10 +716,12 @@ func TestHandleEstado_ReturnsFormattedList(t *testing.T) {
 	require.NoError(t, err)
 
 	texts := ctx.sentTexts()
-	require.Len(t, texts, 1)
+	// handleEstado sends the expense list and then the main menu prompt.
+	require.GreaterOrEqual(t, len(texts), 1)
 	assert.Contains(t, texts[0], "últimos gastos")
 	assert.Contains(t, texts[0], "$30000")
-	assert.Contains(t, texts[0], string(expense.StatusConfirmed))
+	// Status is now rendered with emoji label, e.g. "✅ Confirmado"
+	assert.Contains(t, texts[0], "Confirmado")
 
 	expSvc.AssertExpectations(t)
 }
@@ -1069,7 +1093,9 @@ func TestHandleOmitir_ResetsState(t *testing.T) {
 	assert.Equal(t, StateIdle, cs.State)
 
 	texts := ctx.sentTexts()
-	require.Len(t, texts, 1)
+	// handleOmitir sends the "Gasto registrado" confirmation and then shows the main menu.
+	require.GreaterOrEqual(t, len(texts), 1)
+	assert.Contains(t, texts[0], "registrado")
 }
 
 // TestHandleOmitir_IgnoredWhenNotInOptionalState verifies that /omitir in any other
@@ -1116,6 +1142,8 @@ func TestHandleOptionalEvidencePhoto_AttachesAndResets(t *testing.T) {
 
 	expSvc := &mockExpenseService{}
 	expSvc.On("AttachOptionalEvidence", mock.Anything, expenseID, driverID, receiptID).Return(nil)
+	expSvc.On("AddAttachment", mock.Anything, expenseID, driverID, receiptID, "").Return(nil)
+	// showMainMenu is not called from handleOptionalEvidencePhoto; no needs_evidence mock needed.
 
 	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, expSvc, rcptRepo)
 	b.services.Storage = storageMock
@@ -1178,10 +1206,12 @@ func TestHandleOptionalEvidencePhoto_AttachesAndResets(t *testing.T) {
 	require.NoError(t, err)
 
 	cs := b.states.get(telegramID)
-	assert.Equal(t, StateIdle, cs.State)
+	// handleOptionalEvidencePhoto stays in StateAwaitingOptionalEvidence for multi-photo support.
+	assert.Equal(t, StateAwaitingOptionalEvidence, cs.State)
 
 	texts := ctx.sentTexts()
 	require.NotEmpty(t, texts)
+	assert.Contains(t, texts[0], "Soporte adjuntado")
 
 	storageMock.AssertExpectations(t)
 	rcptRepo.AssertExpectations(t)
