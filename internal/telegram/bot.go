@@ -89,6 +89,7 @@ func (b *Bot) registerHandlers(bot *tele.Bot) {
 	bot.Handle(&tele.Btn{Unique: callbackSendEvidence}, b.handleCallbackSendEvidence)
 	bot.Handle(&tele.Btn{Unique: callbackOmitir}, b.handleCallbackOmitir)
 	bot.Handle(&tele.Btn{Unique: callbackCancelEvidence}, b.handleCallbackCancelEvidence)
+	bot.Handle(&tele.Btn{Unique: callbackRetryPhoto}, b.handleCallbackRetryPhoto)
 
 	// Photo and text messages are handled by the FSM router
 	bot.Handle(tele.OnPhoto, b.handlePhoto)

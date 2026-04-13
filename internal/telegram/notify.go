@@ -80,11 +80,18 @@ func (b *Bot) NotifyOCRResult(ctx context.Context, telegramID int64, receiptID u
 		sb.WriteString(fmt.Sprintf("Fecha: %s\n", *result.Date))
 	}
 
-	// Build inline keyboard for confirm / edit.
+	// Build inline keyboard.
 	confirmBtn := tele.Btn{Unique: callbackConfirmOCR, Text: "Confirmar ✓"}
-	editBtn := tele.Btn{Unique: callbackEditAmount, Text: "Corregir monto ✏️"}
+	editBtn := tele.Btn{Unique: callbackEditAmount, Text: "Ingresar monto ✏️"}
+	retryBtn := tele.Btn{Unique: callbackRetryPhoto, Text: "🔄 Reenviar foto"}
 	kb := &tele.ReplyMarkup{}
-	kb.Inline(tele.Row{confirmBtn, editBtn})
+	if result.Total != nil {
+		// OCR found amount: confirm or correct.
+		kb.Inline(tele.Row{confirmBtn, editBtn})
+	} else {
+		// No amount found: retry photo or enter manually.
+		kb.Inline(tele.Row{retryBtn}, tele.Row{editBtn})
+	}
 
 	return b.send(&telegramUser{id: telegramID}, sb.String(), kb)
 }

@@ -1026,6 +1026,7 @@ func TestHandlePhoto_IdempotencyGuard(t *testing.T) {
 		SelectedTaxiID:     &taxiID,
 		SelectedCategoryID: &catID,
 		PendingExpenseID:   &existingExpenseID, // already has a pending expense
+		PendingReceiptID:   &existingExpenseID, // receipt also set = waiting for OCR, not retry
 	})
 
 	photo := &tele.Photo{File: tele.File{FileID: "some-file-id"}}

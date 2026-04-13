@@ -27,6 +27,7 @@ const (
 	callbackSendEvidence   = "send_evidence"
 	callbackOmitir         = "omitir"
 	callbackCancelEvidence = "cancel_evidence"
+	callbackRetryPhoto     = "retry_photo"
 )
 
 // ─── /start ───────────────────────────────────────────────────────────────────
@@ -209,6 +210,22 @@ func (b *Bot) handleCallbackCancelEvidence(c tele.Context) error {
 	return c.Send("Cancelado.", persistentMenuKeyboard())
 }
 
+// handleCallbackRetryPhoto handles [🔄 Reenviar foto] — lets the driver retry OCR with a new photo.
+// Keeps the existing expense but clears PendingReceiptID so handlePhoto creates a fresh receipt.
+func (b *Bot) handleCallbackRetryPhoto(c tele.Context) error {
+	telegramID := c.Sender().ID
+	cs := b.states.get(telegramID)
+	if cs.Claims == nil || cs.PendingExpenseID == nil {
+		_ = c.Respond()
+		return c.Send("No hay gasto pendiente. Usá el menú para registrar uno.")
+	}
+	cs.State = StateAwaitingReceiptPhoto
+	cs.PendingReceiptID = nil
+	b.states.set(telegramID, cs)
+	_ = c.Respond()
+	return c.Send("Enviá una foto más clara de la factura:")
+}
+
 // ─── /gasto ───────────────────────────────────────────────────────────────────
 
 // handleGasto initiates the multi-step expense registration flow.
@@ -387,8 +404,13 @@ func (b *Bot) handlePhoto(c tele.Context) error {
 		return nil
 	}
 
-	// Idempotency guard: if a pending expense already exists in this state,
-	// the driver already sent a photo and is waiting for OCR. Don't create another.
+	// Retry path: expense exists but receipt was cleared for re-upload (handleCallbackRetryPhoto).
+	// Create a new receipt and update the existing expense instead of creating a new one.
+	if cs.PendingExpenseID != nil && cs.PendingReceiptID == nil {
+		return b.handleRetryPhoto(ctx, c, cs)
+	}
+
+	// Idempotency guard: expense + receipt already created, waiting for OCR.
 	if cs.PendingExpenseID != nil {
 		return c.Send("Ya tenés un gasto pendiente de confirmación. Esperá el resultado del procesamiento.")
 	}
@@ -768,6 +790,56 @@ func (b *Bot) handleEvidencePhoto(ctx context.Context, c tele.Context, cs *Conve
 	cs.State = StateAwaitingOptionalEvidence
 	b.states.set(telegramID, cs)
 	return c.Send("Evidencia enviada ✓ El administrador revisará tu gasto.\n\n¿Querés adjuntar otro soporte? Enviá otra foto o tocá el botón para terminar.", omitirDoneKeyboard())
+}
+
+// handleRetryPhoto handles a new photo upload when the driver chose to retry OCR.
+// It creates a fresh receipt, links it to the existing expense, then waits for OCR.
+func (b *Bot) handleRetryPhoto(ctx context.Context, c tele.Context, cs *ConversationState) error {
+	telegramID := c.Sender().ID
+
+	photo := c.Message().Photo
+	if photo == nil {
+		return c.Send("No se pudo leer la foto. Intentá de nuevo.")
+	}
+
+	photoBytes, fileID, err := b.downloadPhoto(ctx, c, photo)
+	if err != nil {
+		slog.Error("retry: failed to download photo", "err", err)
+		return c.Send("No se pudo descargar la foto. Intentá de nuevo.")
+	}
+
+	storageKey := fmt.Sprintf("receipts/%s/%s.jpg", cs.Claims.DriverID, uuid.New())
+	storageURL, err := b.services.Storage.Upload(ctx, storageKey, photoBytes, "image/jpeg")
+	if err != nil {
+		slog.Error("retry: failed to upload photo", "err", err)
+		return c.Send("No se pudo guardar la foto. Intentá de nuevo.")
+	}
+
+	r := &receipt.Receipt{
+		DriverID:       cs.Claims.DriverID,
+		TaxiID:         *cs.SelectedTaxiID,
+		StorageURL:     storageURL,
+		TelegramFileID: fileID,
+		OCRStatus:      receipt.OCRStatusPending,
+	}
+	createdReceipt, err := b.services.Receipt.Create(ctx, r)
+	if err != nil {
+		slog.Error("retry: failed to create receipt", "err", err)
+		return c.Send("Error al registrar el recibo. Intentá de nuevo.")
+	}
+
+	// Link the new receipt to the existing expense.
+	if err := b.services.Expense.AttachOptionalEvidence(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID); err != nil {
+		slog.Error("retry: failed to update receipt on expense", "err", err)
+		return c.Send("Error al actualizar el gasto. Intentá de nuevo.")
+	}
+
+	receiptID := createdReceipt.ID
+	cs.PendingReceiptID = &receiptID
+	cs.State = StateAwaitingOCRConfirmation
+	b.states.set(telegramID, cs)
+
+	return c.Send("Foto recibida ✓ Procesando factura de nuevo...")
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
