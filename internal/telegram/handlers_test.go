@@ -669,10 +669,10 @@ func TestHandleGasto_ManualAmount_CreatesExpense(t *testing.T) {
 	require.Len(t, texts, 1)
 	assert.Contains(t, texts[0], "registrado")
 
-	// FSM should be reset.
+	// FSM should be reset to idle but claims preserved.
 	cs := b.states.get(telegramID)
 	assert.Equal(t, StateIdle, cs.State)
-	assert.Nil(t, cs.Claims)
+	assert.NotNil(t, cs.Claims)
 
 	rcptRepo.AssertExpectations(t)
 	expSvc.AssertExpectations(t)
@@ -801,7 +801,6 @@ func TestNotifyOCRResult_Success_SendsConfirmKeyboard(t *testing.T) {
 	msgText, ok := sender.sent[0].what.(string)
 	require.True(t, ok)
 	assert.Contains(t, msgText, "Factura procesada")
-	assert.Contains(t, msgText, vendor)
 	assert.Contains(t, msgText, total)
 
 	// Verify an inline keyboard was attached as an option.

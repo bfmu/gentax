@@ -69,7 +69,17 @@ func (s *conversationStore) set(telegramID int64, cs *ConversationState) {
 	s.mu.Store(telegramID, cs)
 }
 
-// reset removes the ConversationState for telegramID, returning the user to idle.
+// reset returns the user to StateIdle while preserving their JWT claims.
+// This keeps the driver authenticated across multiple expense registrations.
 func (s *conversationStore) reset(telegramID int64) {
-	s.mu.Delete(telegramID)
+	v, ok := s.mu.Load(telegramID)
+	if !ok {
+		return
+	}
+	cs := v.(*ConversationState)
+	s.mu.Store(telegramID, &ConversationState{
+		State:     StateIdle,
+		Claims:    cs.Claims, // preserve JWT — driver stays logged in
+		UpdatedAt: time.Now(),
+	})
 }
