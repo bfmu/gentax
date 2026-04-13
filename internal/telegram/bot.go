@@ -15,7 +15,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-const jwtTTL = time.Hour
+const jwtTTL = 30 * 24 * time.Hour // 30 days — drivers stay logged in across bot restarts
 
 // Sender is an abstraction over *tele.Bot.Send that allows injection of a mock in tests.
 type Sender interface {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -15,10 +16,13 @@ import (
 // NotifyFunc is a callback invoked after OCR completes (success or failure).
 // It should send a Telegram notification to the driver. Errors are logged but do not
 // propagate — a notification failure MUST NOT cause Process to return an error.
-type NotifyFunc func(ctx context.Context, driverTelegramID int64, result *OCRResult) error
+// driverID is the UUID of the driver who submitted the receipt.
+// result is nil when OCR failed — the callback should prompt manual amount entry.
+type NotifyFunc func(ctx context.Context, driverID uuid.UUID, receiptID uuid.UUID, result *OCRResult) error
 
 // processor implements Processor.
 type processor struct {
+	mu             sync.Mutex
 	repo           Repository
 	ocr            OCRClient
 	storage        StorageClient
@@ -74,16 +78,16 @@ func (p *processor) Process(ctx context.Context, receiptID uuid.UUID) error {
 
 	imageBytes, err := p.downloadImage(ctx, r.StorageURL)
 	if err != nil {
-		return p.failReceipt(ctx, receiptID, fmt.Errorf("download image: %w", err))
+		return p.failReceipt(ctx, r, fmt.Errorf("download image: %w", err))
 	}
 
 	ocrResult, err := p.ocr.ExtractData(ctx, imageBytes)
 	if err != nil {
-		return p.failReceipt(ctx, receiptID, fmt.Errorf("ocr extract: %w", err))
+		return p.failReceipt(ctx, r, fmt.Errorf("ocr extract: %w", err))
 	}
 
 	if err := p.repo.UpdateOCRFields(ctx, receiptID, ocrResult); err != nil {
-		return p.failReceipt(ctx, receiptID, fmt.Errorf("update ocr fields: %w", err))
+		return p.failReceipt(ctx, r, fmt.Errorf("update ocr fields: %w", err))
 	}
 
 	if err := p.repo.SetOCRStatus(ctx, receiptID, OCRStatusDone, ocrResult.RawJSON); err != nil {
@@ -106,14 +110,16 @@ func (p *processor) Process(ctx context.Context, receiptID uuid.UUID) error {
 
 // failReceipt marks the receipt as failed, stores error JSON, logs, and returns nil
 // so the worker can continue processing other receipts.
-func (p *processor) failReceipt(ctx context.Context, id uuid.UUID, cause error) error {
-	slog.Error("processor: ocr failed", "receipt_id", id, "error", cause)
+// It also notifies the driver (with result=nil) so they can enter the amount manually.
+func (p *processor) failReceipt(ctx context.Context, r *Receipt, cause error) error {
+	slog.Error("processor: ocr failed", "receipt_id", r.ID, "error", cause)
 
 	errJSON, _ := json.Marshal(map[string]string{"error": cause.Error()})
-	if setErr := p.repo.SetOCRStatus(ctx, id, OCRStatusFailed, errJSON); setErr != nil {
-		slog.Error("processor: set status failed", "receipt_id", id, "error", setErr)
+	if setErr := p.repo.SetOCRStatus(ctx, r.ID, OCRStatusFailed, errJSON); setErr != nil {
+		slog.Error("processor: set status failed", "receipt_id", r.ID, "error", setErr)
 	}
-	return nil // do NOT propagate — the worker should continue
+	p.sendNotify(ctx, r, nil) // nil result = OCR failed, prompt manual entry
+	return nil                // do NOT propagate — the worker should continue
 }
 
 // downloadImage fetches image bytes from a URL, trying StorageClient first then HTTP GET.
@@ -143,13 +149,21 @@ func (p *processor) downloadImage(ctx context.Context, storageURL string) ([]byt
 
 // sendNotify calls the notify function if set, logging errors without propagating them.
 func (p *processor) sendNotify(ctx context.Context, r *Receipt, result *OCRResult) {
-	if p.notify == nil {
+	p.mu.Lock()
+	fn := p.notify
+	p.mu.Unlock()
+	if fn == nil {
 		return
 	}
-	// DriverID is a UUID; the Telegram notify func expects the driver's telegram_id (int64).
-	// In the real wiring layer, this function will look up telegram_id from the driver record.
-	// Here we pass 0 as a sentinel — the concrete implementation handles the lookup.
-	if err := p.notify(ctx, 0, result); err != nil {
+	if err := fn(ctx, r.DriverID, r.ID, result); err != nil {
 		slog.Error("processor: notify failed", "receipt_id", r.ID, "error", err)
 	}
+}
+
+// SetNotify replaces the OCR result notification callback. Thread-safe; may be called
+// after construction (e.g., after the Telegram bot is initialised).
+func (p *processor) SetNotify(fn NotifyFunc) {
+	p.mu.Lock()
+	p.notify = fn
+	p.mu.Unlock()
 }

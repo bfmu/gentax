@@ -83,6 +83,9 @@ type Repository interface {
 // Processor orchestrates the OCR pipeline for a single receipt.
 type Processor interface {
 	Process(ctx context.Context, receiptID uuid.UUID) error
+	// SetNotify replaces the OCR result notification callback.
+	// May be called after construction (e.g., after the Telegram bot is initialised).
+	SetNotify(fn NotifyFunc)
 }
 
 // ExpenseAmountUpdater updates the amount of an expense linked to a receipt.

@@ -10,7 +10,9 @@ import (
 
 	"github.com/bmunoz/gentax/internal/app"
 	"github.com/bmunoz/gentax/internal/config"
+	"github.com/bmunoz/gentax/internal/receipt"
 	"github.com/bmunoz/gentax/internal/telegram"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -59,6 +61,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gentax bot: create bot: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Wire OCR notification: when OCR completes (or fails), notify the driver via Telegram.
+	deps.Processor.SetNotify(func(ctx context.Context, driverID, receiptID uuid.UUID, result *receipt.OCRResult) error {
+		tid, err := deps.DriverRepo.GetDriverTelegramID(ctx, driverID)
+		if err != nil || tid == nil {
+			return nil
+		}
+		return bot.NotifyOCRResult(ctx, *tid, receiptID, result)
+	})
 
 	slog.Info("gentax bot starting")
 

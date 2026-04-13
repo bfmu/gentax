@@ -36,6 +36,7 @@ export default function ExpenseDetail() {
   const [reason, setReason] = useState('');
   const [evidenceDialogOpen, setEvidenceDialogOpen] = useState(false);
   const [evidenceMessage, setEvidenceMessage] = useState('');
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -51,6 +52,20 @@ export default function ExpenseDetail() {
   }
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    let objectUrl: string | null = null;
+    client.get<Blob>(`/expenses/${id}/receipt`, { responseType: 'blob' })
+      .then(res => {
+        objectUrl = URL.createObjectURL(res.data);
+        setReceiptUrl(objectUrl);
+      })
+      .catch(() => setReceiptUrl(null));
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [id]);
 
   async function approve() {
     await client.patch(`/expenses/${id}/approve`);
@@ -148,16 +163,14 @@ export default function ExpenseDetail() {
         </CardContent>
       </Card>
 
-      {/* Receipt image via proxy endpoint */}
+      {/* Receipt image fetched via API client (includes auth header) */}
       <Card>
         <CardHeader><CardTitle className="text-base">Recibo</CardTitle></CardHeader>
         <CardContent>
-          <img
-            src={`/api/expenses/${id}/receipt`}
-            alt="Recibo"
-            className="max-w-full rounded border"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
+          {receiptUrl
+            ? <img src={receiptUrl} alt="Recibo" className="max-w-full rounded border" />
+            : <p className="text-sm text-muted-foreground">Sin recibo adjunto.</p>
+          }
         </CardContent>
       </Card>
 

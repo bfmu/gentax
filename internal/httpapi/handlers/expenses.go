@@ -20,10 +20,11 @@ const (
 	maxLimit     = 100
 )
 
-// EvidenceNotifier sends a Telegram notification to the driver when evidence is requested.
+// EvidenceNotifier sends Telegram notifications to drivers for expense lifecycle events.
 // Implementations must be nil-safe — the handler checks for nil before calling.
 type EvidenceNotifier interface {
 	NotifyEvidenceRequest(ctx context.Context, expenseID uuid.UUID, message string) error
+	NotifyRejection(ctx context.Context, expenseID uuid.UUID, reason string) error
 }
 
 // StorageReader downloads bytes from a storage URL.
@@ -212,6 +213,10 @@ func (h *ExpenseHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if err := h.expenseSvc.Reject(r.Context(), id, claims.OwnerID, req.Reason); err != nil {
 		mw.DomainError(w, err)
 		return
+	}
+
+	if h.evidenceNotifier != nil {
+		go func() { _ = h.evidenceNotifier.NotifyRejection(context.Background(), id, req.Reason) }()
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})

@@ -34,6 +34,9 @@ services:
         condition: service_healthy
     volumes:
       - gentax_receipts:/data/receipts
+    networks:
+      - default
+      - proxy
     restart: unless-stopped
 
   web:
@@ -44,6 +47,9 @@ services:
       WEB_PORT: "${WEB_PORT:-3000}"
     ports:
       - "${WEB_PORT:-3000}:3000"
+    networks:
+      - default
+      - proxy
     depends_on:
       - api
     restart: unless-stopped
@@ -63,3 +69,8 @@ services:
 volumes:
   gentax_pgdata:
   gentax_receipts:
+
+networks:
+  default:
+  proxy:
+    external: true

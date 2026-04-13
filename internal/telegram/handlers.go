@@ -271,7 +271,7 @@ func (b *Bot) handlePhoto(c tele.Context) error {
 	cs := b.states.get(telegramID)
 
 	if cs.Claims == nil {
-		return nil
+		return c.Send("No estás autenticado. Enviá /start para iniciar sesión.")
 	}
 
 	if cs.State == StateAwaitingEvidencePhoto {
@@ -355,7 +355,7 @@ func (b *Bot) handleText(c tele.Context) error {
 	cs := b.states.get(telegramID)
 
 	if cs.Claims == nil {
-		return nil
+		return c.Send("No estás autenticado. Enviá /start para iniciar sesión.")
 	}
 
 	switch cs.State {
@@ -363,8 +363,9 @@ func (b *Bot) handleText(c tele.Context) error {
 		return b.handleManualAmount(ctx, c, cs)
 	case StateAwaitingManualAmount:
 		return b.handleManualAmount(ctx, c, cs)
+	default:
+		return c.Send("Comandos disponibles:\n/gasto — Registrar un gasto\n/estado — Ver tus últimos gastos\n/soporte — Enviar evidencia pendiente\n/omitir — Omitir evidencia opcional")
 	}
-	return nil
 }
 
 // handleManualAmount parses a COP amount from text and creates a receipt+expense.

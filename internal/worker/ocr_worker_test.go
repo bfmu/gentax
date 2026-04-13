@@ -27,6 +27,9 @@ func (m *mockProcessor) Process(ctx context.Context, receiptID uuid.UUID) error 
 	return args.Error(0)
 }
 
+func (m *mockProcessor) SetNotify(fn receipt.NotifyFunc) {}
+
+
 // TestOCRWorker_ProcessesPendingReceipts verifies that the worker calls Process for each
 // pending receipt returned by ListPendingOCR.
 func TestOCRWorker_ProcessesPendingReceipts(t *testing.T) {
