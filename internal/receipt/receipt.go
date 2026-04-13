@@ -84,3 +84,9 @@ type Repository interface {
 type Processor interface {
 	Process(ctx context.Context, receiptID uuid.UUID) error
 }
+
+// ExpenseAmountUpdater updates the amount of an expense linked to a receipt.
+// Lives in receipt package to avoid import cycle with expense package.
+type ExpenseAmountUpdater interface {
+	UpdateAmountByReceiptID(ctx context.Context, receiptID uuid.UUID, amount decimal.Decimal) error
+}

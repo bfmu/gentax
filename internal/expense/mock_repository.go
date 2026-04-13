@@ -32,6 +32,21 @@ func (m *MockRepository) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*E
 	return args.Get(0).(*Expense), args.Error(1)
 }
 
+// GetByReceiptID mocks the GetByReceiptID method.
+func (m *MockRepository) GetByReceiptID(ctx context.Context, receiptID uuid.UUID) (*Expense, error) {
+	args := m.Called(ctx, receiptID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*Expense), args.Error(1)
+}
+
+// GetReceiptStorageURL mocks the GetReceiptStorageURL method.
+func (m *MockRepository) GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error) {
+	args := m.Called(ctx, id, ownerID)
+	return args.String(0), args.Error(1)
+}
+
 // List mocks the List method.
 func (m *MockRepository) List(ctx context.Context, filter ListFilter) ([]*Expense, error) {
 	args := m.Called(ctx, filter)

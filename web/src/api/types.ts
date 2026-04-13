@@ -39,7 +39,7 @@ export interface Expense {
   driver_name: string;
   taxi_plate: string;
   category_name: string;
-  amount: string;
+  amount: string | null;
   status: 'pending' | 'confirmed' | 'needs_evidence' | 'approved' | 'rejected';
   notes: string;
   rejection_reason: string;

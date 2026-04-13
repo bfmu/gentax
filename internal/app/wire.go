@@ -16,11 +16,18 @@ import (
 	"github.com/bmunoz/gentax/internal/config"
 	"github.com/bmunoz/gentax/internal/driver"
 	"github.com/bmunoz/gentax/internal/expense"
+	"github.com/bmunoz/gentax/internal/httpapi/handlers"
 	"github.com/bmunoz/gentax/internal/owner"
 	"github.com/bmunoz/gentax/internal/receipt"
 	"github.com/bmunoz/gentax/internal/storage"
 	"github.com/bmunoz/gentax/internal/taxi"
 	"github.com/bmunoz/gentax/internal/worker"
+)
+
+// Compile-time interface assertions.
+// These ensure that concrete implementations satisfy their interface contracts at build time.
+var (
+	_ handlers.StorageReader = (*storage.LocalStorageClient)(nil)
 )
 
 // Deps holds all wired application dependencies.
@@ -39,9 +46,10 @@ type Deps struct {
 	ExpenseSvc expense.Service
 	OwnerSvc   owner.Service
 
-	Storage   receipt.StorageClient
-	Processor receipt.Processor
-	OCRWorker *worker.OCRWorker
+	Storage       receipt.StorageClient
+	StorageReader handlers.StorageReader // alias: same object as Storage for the HTTP handler layer
+	Processor     receipt.Processor
+	OCRWorker     *worker.OCRWorker
 }
 
 // Build constructs all repositories, services, and the OCR worker from the given config and pool.
@@ -78,8 +86,11 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) (*Deps, error) {
 		ocrClient = receipt.NewTesseractClient()
 	}
 
-	// OCR processor (wired without a notify func; wire notify after bot is constructed if needed)
-	processor := receipt.NewProcessor(receiptRepo, ocrClient, storageClient, nil)
+	// OCR processor: inject ExpenseAmountUpdater so extracted totals are stored after OCR.
+	processor := receipt.NewProcessor(
+		receiptRepo, ocrClient, storageClient, nil,
+		receipt.WithExpenseAmountUpdater(expenseSvc),
+	)
 
 	// OCR worker
 	ocrWorker := worker.NewOCRWorker(
@@ -104,9 +115,10 @@ func Build(cfg *config.Config, pool *pgxpool.Pool) (*Deps, error) {
 		ExpenseSvc: expenseSvc,
 		OwnerSvc:   ownerSvc,
 
-		Storage:   storageClient,
-		Processor: processor,
-		OCRWorker: ocrWorker,
+		Storage:       storageClient,
+		StorageReader: storageClient,
+		Processor:     processor,
+		OCRWorker:     ocrWorker,
 	}, nil
 }
 

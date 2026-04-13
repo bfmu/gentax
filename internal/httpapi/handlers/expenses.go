@@ -26,10 +26,18 @@ type EvidenceNotifier interface {
 	NotifyEvidenceRequest(ctx context.Context, expenseID uuid.UUID, message string) error
 }
 
+// StorageReader downloads bytes from a storage URL.
+// Implementations must support file:// URLs (by reading from the local filesystem)
+// and may delegate cloud URLs to a cloud storage client.
+type StorageReader interface {
+	Download(ctx context.Context, url string) ([]byte, error)
+}
+
 // ExpenseHandler handles /expenses endpoints.
 type ExpenseHandler struct {
 	expenseSvc       expense.Service
 	evidenceNotifier EvidenceNotifier
+	storageReader    StorageReader
 }
 
 // NewExpenseHandler constructs an ExpenseHandler.
@@ -46,6 +54,12 @@ func NewExpenseHandler(expenseSvc expense.Service, notifier ...EvidenceNotifier)
 // WithEvidenceNotifier sets the optional notifier for evidence requests and returns the handler.
 func (h *ExpenseHandler) WithEvidenceNotifier(n EvidenceNotifier) *ExpenseHandler {
 	h.evidenceNotifier = n
+	return h
+}
+
+// WithStorageReader sets the optional storage reader for receipt proxy requests.
+func (h *ExpenseHandler) WithStorageReader(r StorageReader) *ExpenseHandler {
+	h.storageReader = r
 	return h
 }
 
@@ -271,9 +285,10 @@ func parseListFilter(r *http.Request, ownerID uuid.UUID) (expense.ListFilter, er
 		filter.CategoryID = &id
 	}
 
-	if v := q.Get("status"); v != "" {
-		s := expense.Status(v)
-		filter.Status = &s
+	if statusVals := q["status"]; len(statusVals) > 0 {
+		for _, v := range statusVals {
+			filter.Statuses = append(filter.Statuses, expense.Status(v))
+		}
 	}
 
 	if v := q.Get("date_from"); v != "" {
@@ -316,4 +331,43 @@ func parseListFilter(r *http.Request, ownerID uuid.UUID) (expense.ListFilter, er
 	}
 
 	return filter, nil
+}
+
+// ReceiptProxy handles GET /expenses/{id}/receipt.
+// It fetches the storage URL from the service layer, then reads the bytes (via StorageReader
+// for file:// paths or direct HTTP for cloud URLs) and pipes them to the client.
+func (h *ExpenseHandler) ReceiptProxy(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		mw.WriteError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid expense id", "bad_request")
+		return
+	}
+
+	storageURL, err := h.expenseSvc.GetReceiptStorageURL(r.Context(), id, claims.OwnerID)
+	if err != nil {
+		mw.DomainError(w, err)
+		return
+	}
+
+	var data []byte
+	if h.storageReader != nil {
+		data, err = h.storageReader.Download(r.Context(), storageURL)
+		if err != nil {
+			mw.WriteError(w, http.StatusBadGateway, "failed to fetch receipt", "storage_error")
+			return
+		}
+	} else {
+		mw.WriteError(w, http.StatusServiceUnavailable, "storage reader not configured", "not_configured")
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

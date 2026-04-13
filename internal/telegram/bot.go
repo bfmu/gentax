@@ -77,6 +77,7 @@ func (b *Bot) registerHandlers(bot *tele.Bot) {
 	bot.Handle("/gasto", b.handleGasto)
 	bot.Handle("/estado", b.handleEstado)
 	bot.Handle("/soporte", b.handleSoporte)
+	bot.Handle("/omitir", b.handleOmitir)
 
 	// Callback handlers for inline keyboards
 	bot.Handle(&tele.Btn{Unique: callbackSelectTaxi}, b.handleTaxiSelection)

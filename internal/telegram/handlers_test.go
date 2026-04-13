@@ -96,6 +96,14 @@ func (m *mockDriverService) UnassignTaxi(ctx context.Context, driverID, ownerID 
 	return args.Error(0)
 }
 
+func (m *mockDriverService) ListWithAssignment(ctx context.Context, ownerID uuid.UUID) ([]*driver.DriverWithAssignment, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*driver.DriverWithAssignment), args.Error(1)
+}
+
 // ─── mock: DriverRepo (DriverRepo interface) ──────────────────────────────────
 
 type mockDriverRepo struct{ mock.Mock }
@@ -114,6 +122,14 @@ func (m *mockDriverRepo) GetActiveAssignment(ctx context.Context, driverID uuid.
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*driver.Assignment), args.Error(1)
+}
+
+func (m *mockDriverRepo) GetDriverTelegramID(ctx context.Context, driverID uuid.UUID) (*int64, error) {
+	args := m.Called(ctx, driverID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*int64), args.Error(1)
 }
 
 // ─── mock: expense.Service ────────────────────────────────────────────────────
@@ -162,6 +178,55 @@ func (m *mockExpenseService) GetByID(ctx context.Context, id, ownerID uuid.UUID)
 func (m *mockExpenseService) UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error {
 	args := m.Called(ctx, id, amount)
 	return args.Error(0)
+}
+
+func (m *mockExpenseService) UpdateAmountByReceiptID(ctx context.Context, receiptID uuid.UUID, amount decimal.Decimal) error {
+	args := m.Called(ctx, receiptID, amount)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error) {
+	args := m.Called(ctx, id, ownerID)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockExpenseService) AttachOptionalEvidence(ctx context.Context, expenseID, driverID, receiptID uuid.UUID) error {
+	args := m.Called(ctx, expenseID, driverID, receiptID)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) RequestEvidence(ctx context.Context, id, ownerID uuid.UUID, message string) error {
+	args := m.Called(ctx, id, ownerID, message)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) SubmitEvidence(ctx context.Context, id, driverID uuid.UUID, receiptID uuid.UUID) error {
+	args := m.Called(ctx, id, driverID, receiptID)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*expense.ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*expense.ExpenseCategory), args.Error(1)
+}
+
+func (m *mockExpenseService) CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*expense.ExpenseCategory, error) {
+	args := m.Called(ctx, ownerID, name)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*expense.ExpenseCategory), args.Error(1)
+}
+
+func (m *mockExpenseService) DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error {
+	return m.Called(ctx, id, ownerID).Error(0)
+}
+
+func (m *mockExpenseService) SeedDefaultCategories(ctx context.Context, ownerID uuid.UUID) error {
+	return m.Called(ctx, ownerID).Error(0)
 }
 
 func (m *mockExpenseService) SumByTaxi(ctx context.Context, ownerID uuid.UUID, from, to time.Time) ([]*expense.TaxiSummary, error) {
@@ -500,9 +565,8 @@ func TestHandleGasto_SingleTaxi_AutoSelects(t *testing.T) {
 	}, nil)
 	b.services.DriverRepo = repo
 
-	// Use a mockExpenseService that also implements categoryLister.
-	expSvc := &mockExpenseServiceWithCategories{}
-	expSvc.On("ListCategories", mock.Anything, ownerID).Return([]expenseCategory{
+	expSvc := &mockExpenseService{}
+	expSvc.On("ListCategories", mock.Anything, ownerID).Return([]*expense.ExpenseCategory{
 		{ID: catID, Name: "Combustible"},
 	}, nil)
 	b.services.Expense = expSvc
@@ -762,18 +826,6 @@ func TestNotifyOCRResult_Failed_PromptsManualEntry(t *testing.T) {
 
 // ─── helpers for extended mock ────────────────────────────────────────────────
 
-// mockExpenseServiceWithCategories extends mockExpenseService with ListCategories.
-type mockExpenseServiceWithCategories struct {
-	mockExpenseService
-}
-
-func (m *mockExpenseServiceWithCategories) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]expenseCategory, error) {
-	args := m.Called(ctx, ownerID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]expenseCategory), args.Error(1)
-}
 
 // ─── mock: StorageClient ──────────────────────────────────────────────────────
 
@@ -922,6 +974,214 @@ func TestHandleGasto_PhotoReceived_CreatesReceiptAndExpense(t *testing.T) {
 	assert.Equal(t, receiptID, *cs.PendingReceiptID)
 	require.NotNil(t, cs.PendingExpenseID)
 	assert.Equal(t, expenseID, *cs.PendingExpenseID)
+
+	storageMock.AssertExpectations(t)
+	rcptRepo.AssertExpectations(t)
+	expSvc.AssertExpectations(t)
+}
+
+// ─── Bot Phase 5 Tests ─────────────────────────────────────────────────────────
+
+// TestHandlePhoto_IdempotencyGuard verifies that if PendingExpenseID is already set
+// in the StateAwaitingReceiptPhoto state, handlePhoto returns an idempotency message
+// instead of creating another expense.
+func TestHandlePhoto_IdempotencyGuard(t *testing.T) {
+	const telegramID = int64(8001)
+	driverID := uuid.New()
+	ownerID := uuid.New()
+	taxiID := uuid.New()
+	catID := uuid.New()
+	existingExpenseID := uuid.New()
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, &mockExpenseService{}, &mockReceiptRepo{})
+	b.states.set(telegramID, &ConversationState{
+		State: StateAwaitingReceiptPhoto,
+		Claims: &botClaims{
+			DriverID: driverID,
+			OwnerID:  ownerID,
+		},
+		SelectedTaxiID:     &taxiID,
+		SelectedCategoryID: &catID,
+		PendingExpenseID:   &existingExpenseID, // already has a pending expense
+	})
+
+	photo := &tele.Photo{File: tele.File{FileID: "some-file-id"}}
+	ctx := &fakeCtx{
+		sender:  userWithID(telegramID),
+		message: &tele.Message{Photo: photo},
+	}
+
+	err := b.handlePhoto(ctx)
+	require.NoError(t, err)
+
+	texts := ctx.sentTexts()
+	require.Len(t, texts, 1)
+	// Should tell driver there's already a pending expense
+	assert.NotEmpty(t, texts[0])
+	// No new expense should be created
+	cs := b.states.get(telegramID)
+	assert.Equal(t, StateAwaitingReceiptPhoto, cs.State)
+}
+
+// TestHandleConfirmOCR_TransitionsToAwaitingOptionalEvidence verifies that after
+// confirming OCR, the FSM transitions to StateAwaitingOptionalEvidence.
+func TestHandleConfirmOCR_TransitionsToAwaitingOptionalEvidence(t *testing.T) {
+	const telegramID = int64(8002)
+	driverID := uuid.New()
+	expenseID := uuid.New()
+
+	expSvc := &mockExpenseService{}
+	expSvc.On("Confirm", mock.Anything, expenseID, driverID).Return(nil)
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, expSvc, &mockReceiptRepo{})
+	b.states.set(telegramID, &ConversationState{
+		State:            StateAwaitingOCRConfirmation,
+		Claims:           &botClaims{DriverID: driverID},
+		PendingExpenseID: &expenseID,
+	})
+
+	ctx := &fakeCtx{sender: userWithID(telegramID)}
+	err := b.handleConfirmOCR(ctx)
+	require.NoError(t, err)
+
+	cs := b.states.get(telegramID)
+	assert.Equal(t, StateAwaitingOptionalEvidence, cs.State)
+	expSvc.AssertExpectations(t)
+}
+
+// TestHandleOmitir_ResetsState verifies that /omitir in StateAwaitingOptionalEvidence
+// resets the FSM to idle.
+func TestHandleOmitir_ResetsState(t *testing.T) {
+	const telegramID = int64(8003)
+	driverID := uuid.New()
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, &mockExpenseService{}, &mockReceiptRepo{})
+	b.states.set(telegramID, &ConversationState{
+		State:  StateAwaitingOptionalEvidence,
+		Claims: &botClaims{DriverID: driverID},
+	})
+
+	ctx := &fakeCtx{sender: userWithID(telegramID)}
+	err := b.handleOmitir(ctx)
+	require.NoError(t, err)
+
+	cs := b.states.get(telegramID)
+	assert.Equal(t, StateIdle, cs.State)
+
+	texts := ctx.sentTexts()
+	require.Len(t, texts, 1)
+}
+
+// TestHandleOmitir_IgnoredWhenNotInOptionalState verifies that /omitir in any other
+// state does nothing (no message sent).
+func TestHandleOmitir_IgnoredWhenNotInOptionalState(t *testing.T) {
+	const telegramID = int64(8004)
+	driverID := uuid.New()
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, &mockExpenseService{}, &mockReceiptRepo{})
+	b.states.set(telegramID, &ConversationState{
+		State:  StateAwaitingOCRConfirmation,
+		Claims: &botClaims{DriverID: driverID},
+	})
+
+	ctx := &fakeCtx{sender: userWithID(telegramID)}
+	err := b.handleOmitir(ctx)
+	require.NoError(t, err)
+
+	// No message should be sent
+	texts := ctx.sentTexts()
+	assert.Empty(t, texts)
+}
+
+// TestHandleOptionalEvidencePhoto_AttachesAndResets verifies that a photo submitted
+// in StateAwaitingOptionalEvidence attaches the receipt and resets FSM.
+func TestHandleOptionalEvidencePhoto_AttachesAndResets(t *testing.T) {
+	const telegramID = int64(8005)
+	driverID := uuid.New()
+	ownerID := uuid.New()
+	taxiID := uuid.New()
+	expenseID := uuid.New()
+	receiptID := uuid.New()
+
+	const fakeStorageURL = "https://storage.example.com/receipts/optional.jpg"
+
+	storageMock := &mockStorageClient{}
+	storageMock.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, "image/jpeg").
+		Return(fakeStorageURL, nil)
+
+	rcptRepo := &mockReceiptRepo{}
+	rcptRepo.On("Create", mock.Anything, mock.MatchedBy(func(r *receipt.Receipt) bool {
+		return r.DriverID == driverID && r.OCRStatus == receipt.OCRStatusSkipped
+	})).Return(&receipt.Receipt{ID: receiptID}, nil)
+
+	expSvc := &mockExpenseService{}
+	expSvc.On("AttachOptionalEvidence", mock.Anything, expenseID, driverID, receiptID).Return(nil)
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, expSvc, rcptRepo)
+	b.services.Storage = storageMock
+	b.states.set(telegramID, &ConversationState{
+		State: StateAwaitingOptionalEvidence,
+		Claims: &botClaims{
+			DriverID: driverID,
+			OwnerID:  ownerID,
+		},
+		SelectedTaxiID:   &taxiID,
+		PendingExpenseID: &expenseID,
+	})
+
+	// We need to simulate a photo being sent; but downloading requires a real tele.Bot.
+	// Use a simulated bot server like in TestHandleGasto_PhotoReceived.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/getFile"):
+			resp := map[string]interface{}{
+				"ok": true,
+				"result": map[string]interface{}{
+					"file_id":   "optional-file",
+					"file_size": 100,
+					"file_path": "photos/opt.jpg",
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("fake-photo-bytes"))
+		}
+	})
+	fakeTeleServer := httptest.NewServer(mux)
+	defer fakeTeleServer.Close()
+
+	teleBot, err := tele.NewBot(tele.Settings{
+		URL:    fakeTeleServer.URL,
+		Token:  "test:TOKEN",
+		Poller: &tele.LongPoller{},
+		Offline: true,
+	})
+	require.NoError(t, err)
+
+	photo := &tele.Photo{File: tele.File{FileID: "optional-file", FileSize: 100}}
+	ctx := &fakeCtxWithBot{
+		fakeCtx: fakeCtx{
+			sender: userWithID(telegramID),
+			message: &tele.Message{
+				Photo: photo,
+				Sender: userWithID(telegramID),
+			},
+		},
+		teleBot: teleBot,
+	}
+
+	err = b.handlePhoto(ctx)
+	require.NoError(t, err)
+
+	cs := b.states.get(telegramID)
+	assert.Equal(t, StateIdle, cs.State)
+
+	texts := ctx.sentTexts()
+	require.NotEmpty(t, texts)
 
 	storageMock.AssertExpectations(t)
 	rcptRepo.AssertExpectations(t)

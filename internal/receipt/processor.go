@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 )
 
 // NotifyFunc is a callback invoked after OCR completes (success or failure).
@@ -18,21 +19,38 @@ type NotifyFunc func(ctx context.Context, driverTelegramID int64, result *OCRRes
 
 // processor implements Processor.
 type processor struct {
-	repo    Repository
-	ocr     OCRClient
-	storage StorageClient
-	notify  NotifyFunc
+	repo           Repository
+	ocr            OCRClient
+	storage        StorageClient
+	notify         NotifyFunc
+	expenseUpdater ExpenseAmountUpdater // optional; nil means no amount update
+}
+
+// ProcessorOption is a functional option for configuring a Processor.
+type ProcessorOption func(*processor)
+
+// WithExpenseAmountUpdater injects an optional expense amount updater.
+// If set, after a successful OCR with a non-nil Total, the updater will be called.
+func WithExpenseAmountUpdater(u ExpenseAmountUpdater) ProcessorOption {
+	return func(p *processor) {
+		p.expenseUpdater = u
+	}
 }
 
 // NewProcessor creates a new Processor with the provided dependencies.
 // notify may be nil; if nil, notifications are silently skipped.
-func NewProcessor(repo Repository, ocr OCRClient, storage StorageClient, notify NotifyFunc) Processor {
-	return &processor{
+// opts may include WithExpenseAmountUpdater.
+func NewProcessor(repo Repository, ocr OCRClient, storage StorageClient, notify NotifyFunc, opts ...ProcessorOption) Processor {
+	p := &processor{
 		repo:    repo,
 		ocr:     ocr,
 		storage: storage,
 		notify:  notify,
 	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
 }
 
 // Process runs the OCR pipeline for a single receipt identified by receiptID.
@@ -71,6 +89,15 @@ func (p *processor) Process(ctx context.Context, receiptID uuid.UUID) error {
 	if err := p.repo.SetOCRStatus(ctx, receiptID, OCRStatusDone, ocrResult.RawJSON); err != nil {
 		// Best-effort: log but don't fail — data is already written.
 		slog.Error("processor: set status done", "receipt_id", receiptID, "error", err)
+	}
+
+	// Update expense amount if OCR extracted a total and updater is wired.
+	if p.expenseUpdater != nil && ocrResult.Total != nil {
+		if amount, parseErr := decimal.NewFromString(*ocrResult.Total); parseErr == nil {
+			if updErr := p.expenseUpdater.UpdateAmountByReceiptID(ctx, receiptID, amount); updErr != nil {
+				slog.Warn("processor: failed to update expense amount", "receipt_id", receiptID, "error", updErr)
+			}
+		}
 	}
 
 	p.sendNotify(ctx, r, ocrResult)

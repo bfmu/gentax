@@ -238,12 +238,10 @@ func (b *Bot) handleSoporte(c tele.Context) error {
 
 	driverID := cs.Claims.DriverID
 	ownerID := cs.Claims.OwnerID
-	needsEvidence := expense.StatusNeedsEvidence
-
 	expenses, err := b.services.Expense.List(ctx, expense.ListFilter{
 		OwnerID:  ownerID,
 		DriverID: &driverID,
-		Status:   &needsEvidence,
+		Statuses: []expense.Status{expense.StatusNeedsEvidence},
 		Limit:    1,
 	})
 	if err != nil || len(expenses) == 0 {
@@ -280,8 +278,18 @@ func (b *Bot) handlePhoto(c tele.Context) error {
 		return b.handleEvidencePhoto(ctx, c, cs)
 	}
 
+	if cs.State == StateAwaitingOptionalEvidence {
+		return b.handleOptionalEvidencePhoto(ctx, c, cs)
+	}
+
 	if cs.State != StateAwaitingReceiptPhoto {
 		return nil
+	}
+
+	// Idempotency guard: if a pending expense already exists in this state,
+	// the driver already sent a photo and is waiting for OCR. Don't create another.
+	if cs.PendingExpenseID != nil {
+		return c.Send("Ya tenés un gasto pendiente de confirmación. Esperá el resultado del procesamiento.")
 	}
 
 	photo := c.Message().Photo
@@ -436,9 +444,11 @@ func (b *Bot) handleConfirmOCR(c tele.Context) error {
 		return c.Send("No se pudo confirmar el gasto. Intentá de nuevo.")
 	}
 
-	b.states.reset(telegramID)
+	// Transition to optional evidence state instead of resetting.
+	cs.State = StateAwaitingOptionalEvidence
+	b.states.set(telegramID, cs)
 	_ = c.Respond()
-	return c.Send("Gasto confirmado ✓")
+	return c.Send("Gasto confirmado ✓\n\nSi querés adjuntar una foto adicional como evidencia, enviala ahora. O usá /omitir para terminar.")
 }
 
 // handleEditAmount processes the "Corregir monto" callback.
@@ -497,6 +507,65 @@ func (b *Bot) handleEstado(c tele.Context) error {
 		sb.WriteString(fmt.Sprintf("%s | %s | %s\n", date, amount, string(exp.Status)))
 	}
 	return c.Send(sb.String())
+}
+
+// handleOmitir handles /omitir — allows the driver to skip optional evidence submission.
+// Only active in StateAwaitingOptionalEvidence; silently ignored in all other states.
+func (b *Bot) handleOmitir(c tele.Context) error {
+	telegramID := c.Sender().ID
+	cs := b.states.get(telegramID)
+
+	if cs.Claims == nil || cs.State != StateAwaitingOptionalEvidence {
+		return nil
+	}
+
+	b.states.reset(telegramID)
+	return c.Send("Evidencia omitida. Tu gasto quedó registrado.")
+}
+
+// handleOptionalEvidencePhoto processes a photo submitted as optional evidence after OCR confirmation.
+// Attaches the receipt to the expense via AttachOptionalEvidence (no status change) then resets FSM.
+func (b *Bot) handleOptionalEvidencePhoto(ctx context.Context, c tele.Context, cs *ConversationState) error {
+	telegramID := c.Sender().ID
+
+	photo := c.Message().Photo
+	if photo == nil {
+		return c.Send("No se pudo leer la foto. Intentá de nuevo o usá /omitir.")
+	}
+
+	photoBytes, fileID, err := b.downloadPhoto(ctx, c, photo)
+	if err != nil {
+		slog.Error("failed to download optional evidence photo", "err", err)
+		return c.Send("No se pudo descargar la foto. Intentá de nuevo.")
+	}
+
+	storageKey := fmt.Sprintf("receipts/%s/optional-%s.jpg", cs.Claims.DriverID, uuid.New())
+	storageURL, err := b.services.Storage.Upload(ctx, storageKey, photoBytes, "image/jpeg")
+	if err != nil {
+		slog.Error("failed to upload optional evidence", "err", err)
+		return c.Send("No se pudo guardar la foto. Intentá de nuevo.")
+	}
+
+	r := &receipt.Receipt{
+		DriverID:       cs.Claims.DriverID,
+		TaxiID:         *cs.SelectedTaxiID,
+		StorageURL:     storageURL,
+		TelegramFileID: fileID,
+		OCRStatus:      receipt.OCRStatusSkipped,
+	}
+	createdReceipt, err := b.services.Receipt.Create(ctx, r)
+	if err != nil {
+		slog.Error("failed to create optional evidence receipt", "err", err)
+		return c.Send("Error al registrar el comprobante. Intentá de nuevo.")
+	}
+
+	if err := b.services.Expense.AttachOptionalEvidence(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID); err != nil {
+		slog.Error("failed to attach optional evidence", "err", err)
+		return c.Send("Error al adjuntar la evidencia. Intentá de nuevo.")
+	}
+
+	b.states.reset(telegramID)
+	return c.Send("Evidencia adjuntada ✓")
 }
 
 // handleEvidencePhoto processes a photo submitted as evidence for a needs_evidence expense.

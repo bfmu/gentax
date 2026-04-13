@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { formatAmount } from '@/lib/format';
 
-type Tab = 'confirmed' | 'needs_evidence' | 'approved' | 'rejected' | 'all';
+type Tab = 'pending_confirmed' | 'needs_evidence' | 'approved' | 'rejected' | 'all';
 
 const TAB_LABELS: Record<Tab, string> = {
-  confirmed: 'Por aprobar',
+  pending_confirmed: 'Por revisar',
   needs_evidence: 'Esperando soporte',
   approved: 'Aprobados',
   rejected: 'Rechazados',
@@ -37,13 +38,20 @@ const STATUS_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [tab, setTab] = useState<Tab>('confirmed');
+  const [tab, setTab] = useState<Tab>('pending_confirmed');
   const [rejectID, setRejectID] = useState('');
   const [reason, setReason] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
 
   async function load(status: Tab) {
-    const query = status === 'all' ? '' : `?status=${status}`;
+    let query: string;
+    if (status === 'all') {
+      query = '';
+    } else if (status === 'pending_confirmed') {
+      query = '?status=pending&status=confirmed';
+    } else {
+      query = `?status=${status}`;
+    }
     const res = await client.get<Expense[]>(`/expenses${query}`);
     setExpenses(res.data ?? []);
   }
@@ -105,7 +113,7 @@ export default function Expenses() {
               <TableCell>{e.driver_name}</TableCell>
               <TableCell>{e.taxi_plate}</TableCell>
               <TableCell>{e.category_name}</TableCell>
-              <TableCell>{Number(e.amount).toLocaleString('es-CO')}</TableCell>
+              <TableCell>{formatAmount(e.amount)}</TableCell>
               <TableCell>
                 <Badge variant={STATUS_VARIANTS[e.status] ?? 'default'}>
                   {STATUS_LABELS[e.status] ?? e.status}
@@ -115,7 +123,7 @@ export default function Expenses() {
                 <Link to={`/expenses/${e.id}`}>
                   <Button size="sm" variant="outline">Ver detalle</Button>
                 </Link>
-                {e.status === 'confirmed' && (
+                {(e.status === 'confirmed' || e.status === 'pending') && (
                   <>
                     <Button size="sm" onClick={() => approve(e.id)}>Aprobar</Button>
                     <Button size="sm" variant="destructive" onClick={() => openReject(e.id)}>Rechazar</Button>

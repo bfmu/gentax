@@ -180,9 +180,8 @@ func TestExpenseHandler_List_ParsesFilters(t *testing.T) {
 	assert.Equal(t, driverID, *filter.DriverID)
 	assert.Equal(t, 10, filter.Limit)
 	assert.Equal(t, 5, filter.Offset)
-	s := expense.StatusApproved
-	require.NotNil(t, filter.Status)
-	assert.Equal(t, s, *filter.Status)
+	require.Len(t, filter.Statuses, 1)
+	assert.Equal(t, expense.StatusApproved, filter.Statuses[0])
 }
 
 // TestExpenseHandler_List_DefaultLimit asserts the default pagination limit is 20.
@@ -326,6 +325,66 @@ func TestExpenseHandler_RequestEvidence(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		expSvc.AssertNotCalled(t, "RequestEvidence")
 	})
+}
+
+// TestParseListFilter_MultiStatus verifies that multiple ?status= query params are collected.
+func TestParseListFilter_MultiStatus(t *testing.T) {
+	claims, ownerID := adminClaims()
+	_ = claims
+
+	req, _ := http.NewRequest(http.MethodGet, "/expenses?status=pending&status=confirmed", nil)
+	filter, err := parseListFilter(req, ownerID)
+
+	require.NoError(t, err)
+	require.Len(t, filter.Statuses, 2)
+	assert.Contains(t, filter.Statuses, expense.StatusPending)
+	assert.Contains(t, filter.Statuses, expense.StatusConfirmed)
+}
+
+// TestExpenseHandler_ReceiptProxy_OK verifies the receipt proxy serves file:// receipts.
+func TestExpenseHandler_ReceiptProxy_OK(t *testing.T) {
+	expSvc := &mockExpenseService{}
+	h := NewExpenseHandler(expSvc)
+
+	claims, ownerID := adminClaims()
+	expID := uuid.New()
+
+	mockReader := &mockStorageReader{}
+	h.WithStorageReader(mockReader)
+
+	expSvc.On("GetReceiptStorageURL", matchAny, expID, ownerID).Return("file:///tmp/test-receipt.jpg", nil)
+	mockReader.On("Download", matchAny, "file:///tmp/test-receipt.jpg").Return([]byte("fake-image"), nil)
+
+	rtr := chi.NewRouter()
+	rtr.Get("/expenses/{id}/receipt", h.ReceiptProxy)
+	w := httptest.NewRecorder()
+	r := newAuthRequest(http.MethodGet, "/expenses/"+expID.String()+"/receipt", claims)
+	rtr.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "fake-image", w.Body.String())
+	expSvc.AssertExpectations(t)
+	mockReader.AssertExpectations(t)
+}
+
+// TestExpenseHandler_ReceiptProxy_NotFound verifies 404 when expense not found.
+func TestExpenseHandler_ReceiptProxy_NotFound(t *testing.T) {
+	expSvc := &mockExpenseService{}
+	h := NewExpenseHandler(expSvc)
+
+	claims, ownerID := adminClaims()
+	expID := uuid.New()
+
+	expSvc.On("GetReceiptStorageURL", matchAny, expID, ownerID).Return("", expense.ErrNotFound)
+
+	rtr := chi.NewRouter()
+	rtr.Get("/expenses/{id}/receipt", h.ReceiptProxy)
+	w := httptest.NewRecorder()
+	r := newAuthRequest(http.MethodGet, "/expenses/"+expID.String()+"/receipt", claims)
+	rtr.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	expSvc.AssertExpectations(t)
 }
 
 // TestExpenseHandler_GetByID_Success verifies a single expense is returned with 200.

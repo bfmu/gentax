@@ -150,6 +150,21 @@ func (m *mockExpenseService) UpdateAmount(ctx context.Context, id uuid.UUID, amo
 	return args.Error(0)
 }
 
+func (m *mockExpenseService) UpdateAmountByReceiptID(ctx context.Context, receiptID uuid.UUID, amount decimal.Decimal) error {
+	args := m.Called(ctx, receiptID, amount)
+	return args.Error(0)
+}
+
+func (m *mockExpenseService) GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error) {
+	args := m.Called(ctx, id, ownerID)
+	return args.String(0), args.Error(1)
+}
+
+func (m *mockExpenseService) AttachOptionalEvidence(ctx context.Context, expenseID, driverID, receiptID uuid.UUID) error {
+	args := m.Called(ctx, expenseID, driverID, receiptID)
+	return args.Error(0)
+}
+
 func (m *mockExpenseService) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*expense.ExpenseCategory, error) {
 	args := m.Called(ctx, ownerID)
 	if args.Get(0) == nil {
@@ -196,6 +211,16 @@ func (m *mockExpenseService) SumByCategory(ctx context.Context, ownerID uuid.UUI
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]*expense.CategorySummary), args.Error(1)
+}
+
+// ----- mock StorageReader -----
+
+type mockStorageReader struct{ mock.Mock }
+
+func (m *mockStorageReader) Download(ctx context.Context, url string) ([]byte, error) {
+	args := m.Called(ctx, url)
+	res, _ := args.Get(0).([]byte)
+	return res, args.Error(1)
 }
 
 // ----- mock DriverFinder -----

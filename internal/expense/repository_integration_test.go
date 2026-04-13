@@ -78,11 +78,10 @@ func TestExpenseRepository_List_Filters(t *testing.T) {
 	}
 
 	t.Run("filter by status pending", func(t *testing.T) {
-		status := expense.StatusPending
 		filter := expense.ListFilter{
-			OwnerID: owner.ID,
-			Status:  &status,
-			Limit:   20,
+			OwnerID:  owner.ID,
+			Statuses: []expense.Status{expense.StatusPending},
+			Limit:    20,
 		}
 		got, err := repo.List(ctx, filter)
 		require.NoError(t, err)
@@ -289,5 +288,127 @@ func TestExpenseRepository_GetByID_NotFound(t *testing.T) {
 	owner := testutil.CreateOwner(t, pool)
 
 	_, err := repo.GetByID(ctx, uuid.New(), owner.ID)
+	require.ErrorIs(t, err, expense.ErrNotFound)
+}
+
+// TestExpenseRepository_List_MultiStatus verifies that Statuses filter works with ANY($N).
+func TestExpenseRepository_List_MultiStatus(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := expense.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	driver := testutil.CreateDriver(t, pool, owner.ID)
+	taxi := testutil.CreateTaxi(t, pool, owner.ID)
+	category := testutil.CreateExpenseCategory(t, pool, owner.ID)
+	receipt := testutil.CreateReceipt(t, pool, driver.ID, taxi.ID)
+
+	// Create one pending expense.
+	ep, err := repo.Create(ctx, expense.CreateInput{
+		OwnerID:    owner.ID,
+		DriverID:   driver.ID,
+		TaxiID:     taxi.ID,
+		CategoryID: category.ID,
+		ReceiptID:  receipt.ID,
+	})
+	require.NoError(t, err)
+
+	// Create one confirmed expense.
+	ec, err := repo.Create(ctx, expense.CreateInput{
+		OwnerID:    owner.ID,
+		DriverID:   driver.ID,
+		TaxiID:     taxi.ID,
+		CategoryID: category.ID,
+		ReceiptID:  receipt.ID,
+	})
+	require.NoError(t, err)
+	err = repo.UpdateStatus(ctx, ec.ID, owner.ID, expense.StatusConfirmed, nil, "")
+	require.NoError(t, err)
+
+	// Create one approved expense.
+	ea, err := repo.Create(ctx, expense.CreateInput{
+		OwnerID:    owner.ID,
+		DriverID:   driver.ID,
+		TaxiID:     taxi.ID,
+		CategoryID: category.ID,
+		ReceiptID:  receipt.ID,
+	})
+	require.NoError(t, err)
+	err = repo.UpdateStatus(ctx, ea.ID, owner.ID, expense.StatusConfirmed, nil, "")
+	require.NoError(t, err)
+	err = repo.UpdateStatus(ctx, ea.ID, owner.ID, expense.StatusApproved, &owner.ID, "")
+	require.NoError(t, err)
+
+	_ = ep // used
+
+	// Filter for pending + confirmed only.
+	filter := expense.ListFilter{
+		OwnerID:  owner.ID,
+		Statuses: []expense.Status{expense.StatusPending, expense.StatusConfirmed},
+		Limit:    20,
+	}
+	got, err := repo.List(ctx, filter)
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+	for _, e := range got {
+		assert.NotEqual(t, expense.StatusApproved, e.Status)
+	}
+}
+
+// TestExpenseRepository_GetByReceiptID verifies lookup by receipt_id.
+func TestExpenseRepository_GetByReceiptID(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := expense.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	driver := testutil.CreateDriver(t, pool, owner.ID)
+	taxi := testutil.CreateTaxi(t, pool, owner.ID)
+	category := testutil.CreateExpenseCategory(t, pool, owner.ID)
+	receipt := testutil.CreateReceipt(t, pool, driver.ID, taxi.ID)
+
+	created, err := repo.Create(ctx, expense.CreateInput{
+		OwnerID:    owner.ID,
+		DriverID:   driver.ID,
+		TaxiID:     taxi.ID,
+		CategoryID: category.ID,
+		ReceiptID:  receipt.ID,
+	})
+	require.NoError(t, err)
+
+	got, err := repo.GetByReceiptID(ctx, receipt.ID)
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+
+	_, err = repo.GetByReceiptID(ctx, uuid.New())
+	require.ErrorIs(t, err, expense.ErrNotFound)
+}
+
+// TestExpenseRepository_GetReceiptStorageURL verifies URL retrieval.
+func TestExpenseRepository_GetReceiptStorageURL(t *testing.T) {
+	pool := testutil.NewTestDB(t)
+	repo := expense.NewRepository(pool)
+	ctx := context.Background()
+
+	owner := testutil.CreateOwner(t, pool)
+	driver := testutil.CreateDriver(t, pool, owner.ID)
+	taxi := testutil.CreateTaxi(t, pool, owner.ID)
+	category := testutil.CreateExpenseCategory(t, pool, owner.ID)
+	receipt := testutil.CreateReceipt(t, pool, driver.ID, taxi.ID)
+
+	created, err := repo.Create(ctx, expense.CreateInput{
+		OwnerID:    owner.ID,
+		DriverID:   driver.ID,
+		TaxiID:     taxi.ID,
+		CategoryID: category.ID,
+		ReceiptID:  receipt.ID,
+	})
+	require.NoError(t, err)
+
+	url, err := repo.GetReceiptStorageURL(ctx, created.ID, owner.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, url)
+
+	_, err = repo.GetReceiptStorageURL(ctx, uuid.New(), owner.ID)
 	require.ErrorIs(t, err, expense.ErrNotFound)
 }

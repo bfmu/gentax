@@ -26,6 +26,8 @@ const (
 	StateAwaitingOCRConfirmation
 	// StateAwaitingEvidencePhoto — owner requested evidence; waiting for driver to send a new receipt photo.
 	StateAwaitingEvidencePhoto
+	// StateAwaitingOptionalEvidence — expense confirmed; driver may attach optional supporting evidence.
+	StateAwaitingOptionalEvidence
 )
 
 // ConversationState holds per-user FSM data for an active expense flow.

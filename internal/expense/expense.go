@@ -24,7 +24,7 @@ const (
 // validTransitions defines the allowed state machine moves.
 // Terminal states (approved, rejected) have no outgoing transitions.
 var validTransitions = map[Status][]Status{
-	StatusPending:       {StatusConfirmed},
+	StatusPending:       {StatusConfirmed, StatusApproved, StatusRejected, StatusNeedsEvidence},
 	StatusConfirmed:     {StatusApproved, StatusRejected, StatusNeedsEvidence},
 	StatusNeedsEvidence: {StatusConfirmed, StatusRejected},
 	StatusApproved:      {},
@@ -87,7 +87,7 @@ type ListFilter struct {
 	DriverID   *uuid.UUID
 	TaxiID     *uuid.UUID
 	CategoryID *uuid.UUID
-	Status     *Status
+	Statuses   []Status   // filter by multiple statuses; empty means no filter
 	DateFrom   *time.Time
 	DateTo     *time.Time
 	Limit      int // default 20, max 100
@@ -131,10 +131,12 @@ type ExpenseCategory struct {
 type Repository interface {
 	Create(ctx context.Context, input CreateInput) (*Expense, error)
 	GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error)
+	GetByReceiptID(ctx context.Context, receiptID uuid.UUID) (*Expense, error)
 	List(ctx context.Context, filter ListFilter) ([]*Expense, error)
 	UpdateStatus(ctx context.Context, id, ownerID uuid.UUID, status Status, reviewedBy *uuid.UUID, rejectionReason string) error
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
 	UpdateReceiptID(ctx context.Context, id uuid.UUID, receiptID uuid.UUID) error
+	GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error)
 	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
 	CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error)
 	DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error
@@ -155,6 +157,9 @@ type Service interface {
 	List(ctx context.Context, filter ListFilter) ([]*Expense, error)
 	GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Expense, error)
 	UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
+	UpdateAmountByReceiptID(ctx context.Context, receiptID uuid.UUID, amount decimal.Decimal) error
+	GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error)
+	AttachOptionalEvidence(ctx context.Context, expenseID, driverID, receiptID uuid.UUID) error
 	ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error)
 	CreateCategory(ctx context.Context, ownerID uuid.UUID, name string) (*ExpenseCategory, error)
 	DeleteCategory(ctx context.Context, id, ownerID uuid.UUID) error

@@ -71,6 +71,7 @@ func main() {
 		Driver:          deps.DriverSvc,
 		Expense:         deps.ExpenseSvc,
 		Owner:           deps.OwnerSvc,
+		StorageReader:   deps.StorageReader,
 		BootstrapSecret: cfg.BootstrapSecret,
 		CORSOrigin:      cfg.CORSOrigin,
 	}

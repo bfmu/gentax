@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { formatAmount } from '@/lib/format';
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pendiente',
@@ -123,7 +124,7 @@ export default function ExpenseDetail() {
             </div>
             <div>
               <p className="text-muted-foreground">Monto (COP)</p>
-              <p className="font-medium">{Number(expense.amount).toLocaleString('es-CO')}</p>
+              <p className="font-medium">{formatAmount(expense.amount)}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Fecha</p>
@@ -147,31 +148,22 @@ export default function ExpenseDetail() {
         </CardContent>
       </Card>
 
-      {expense.receipt_image_url && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Recibo</CardTitle></CardHeader>
-          <CardContent>
-            <img
-              src={expense.receipt_image_url}
-              alt="Recibo"
-              className="max-w-full rounded border"
-            />
-          </CardContent>
-        </Card>
-      )}
+      {/* Receipt image via proxy endpoint */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Recibo</CardTitle></CardHeader>
+        <CardContent>
+          <img
+            src={`/api/expenses/${id}/receipt`}
+            alt="Recibo"
+            className="max-w-full rounded border"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        </CardContent>
+      </Card>
 
-      {expense.ocr_raw && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Texto OCR</CardTitle></CardHeader>
-          <CardContent>
-            <pre className="text-xs whitespace-pre-wrap bg-muted p-3 rounded">{expense.ocr_raw}</pre>
-          </CardContent>
-        </Card>
-      )}
-
-      {(expense.status === 'confirmed' || expense.status === 'needs_evidence') && (
+      {(expense.status === 'confirmed' || expense.status === 'pending' || expense.status === 'needs_evidence') && (
         <div className="flex gap-3">
-          {expense.status === 'confirmed' && (
+          {(expense.status === 'confirmed' || expense.status === 'pending') && (
             <>
               <Button onClick={approve}>Aprobar</Button>
               <Button variant="destructive" onClick={openReject}>Rechazar</Button>

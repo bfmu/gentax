@@ -25,6 +25,7 @@ type Services struct {
 	Expense           expense.Service
 	Owner             owner.Service
 	EvidenceNotifier  handlers.EvidenceNotifier // optional; nil disables Telegram notifications
+	StorageReader     handlers.StorageReader    // optional; nil disables receipt proxy
 	BootstrapSecret   string
 	CORSOrigin        string
 }
@@ -66,7 +67,9 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 	ownerAuthH := handlers.NewOwnerAuthHandler(svc.Owner, issuer, svc.BootstrapSecret).WithExpenseService(svc.Expense)
 	taxiH := handlers.NewTaxiHandler(svc.Taxi, svc.Driver)
 	driverH := handlers.NewDriverHandler(svc.Driver)
-	expenseH := handlers.NewExpenseHandler(svc.Expense).WithEvidenceNotifier(svc.EvidenceNotifier)
+	expenseH := handlers.NewExpenseHandler(svc.Expense).
+		WithEvidenceNotifier(svc.EvidenceNotifier).
+		WithStorageReader(svc.StorageReader)
 	reportH := handlers.NewReportHandler(svc.Expense)
 	catH := handlers.NewCategoryHandler(svc.Expense)
 
@@ -96,6 +99,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 		// Expense management (admin operations).
 		r.Get("/expenses", expenseH.List)
 		r.Get("/expenses/{id}", expenseH.GetByID)
+		r.Get("/expenses/{id}/receipt", expenseH.ReceiptProxy)
 		r.Patch("/expenses/{id}/approve", expenseH.Approve)
 		r.Patch("/expenses/{id}/reject", expenseH.Reject)
 		r.Patch("/expenses/{id}/request-evidence", expenseH.RequestEvidence)

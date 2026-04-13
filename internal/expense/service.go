@@ -175,6 +175,35 @@ func (s *service) UpdateAmount(ctx context.Context, id uuid.UUID, amount decimal
 	return s.repo.UpdateAmount(ctx, id, amount)
 }
 
+// UpdateAmountByReceiptID looks up an expense by its receipt ID, then updates its amount.
+// Used by the OCR processor to set the extracted total without knowing the expense ID.
+func (s *service) UpdateAmountByReceiptID(ctx context.Context, receiptID uuid.UUID, amount decimal.Decimal) error {
+	exp, err := s.repo.GetByReceiptID(ctx, receiptID)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdateAmount(ctx, exp.ID, amount)
+}
+
+// GetReceiptStorageURL returns the storage URL for the receipt associated with an expense.
+// Scoped to ownerID for multi-tenant isolation.
+func (s *service) GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error) {
+	return s.repo.GetReceiptStorageURL(ctx, id, ownerID)
+}
+
+// AttachOptionalEvidence attaches a new receipt to an existing expense without changing its status.
+// Only the driver who owns the expense may attach evidence.
+func (s *service) AttachOptionalEvidence(ctx context.Context, expenseID, driverID, receiptID uuid.UUID) error {
+	exp, err := s.repo.GetByID(ctx, expenseID, uuid.Nil) // driver path: skip owner filter
+	if err != nil {
+		return err
+	}
+	if exp.DriverID != driverID {
+		return ErrNotFound
+	}
+	return s.repo.UpdateReceiptID(ctx, expenseID, receiptID)
+}
+
 // ListCategories returns all expense categories for the given owner.
 func (s *service) ListCategories(ctx context.Context, ownerID uuid.UUID) ([]*ExpenseCategory, error) {
 	return s.repo.ListCategories(ctx, ownerID)

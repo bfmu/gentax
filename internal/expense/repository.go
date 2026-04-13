@@ -188,9 +188,13 @@ func (r *pgxRepository) List(ctx context.Context, filter ListFilter) ([]*Expense
 		args = append(args, *filter.CategoryID)
 		idx++
 	}
-	if filter.Status != nil {
-		where = append(where, fmt.Sprintf("status = $%d", idx))
-		args = append(args, string(*filter.Status))
+	if len(filter.Statuses) > 0 {
+		statusStrs := make([]string, len(filter.Statuses))
+		for i, s := range filter.Statuses {
+			statusStrs[i] = string(s)
+		}
+		where = append(where, fmt.Sprintf("status = ANY($%d)", idx))
+		args = append(args, statusStrs)
 		idx++
 	}
 	if filter.DateFrom != nil {
@@ -281,6 +285,34 @@ func (r *pgxRepository) UpdateAmount(ctx context.Context, id uuid.UUID, amount d
 		return ErrNotFound
 	}
 	return nil
+}
+
+// GetByReceiptID returns an expense by its receipt_id (no owner scoping — internal use only).
+// Returns ErrNotFound if no matching record exists.
+func (r *pgxRepository) GetByReceiptID(ctx context.Context, receiptID uuid.UUID) (*Expense, error) {
+	q := `SELECT ` + selectExpenseCols + ` FROM expenses WHERE receipt_id = $1 LIMIT 1`
+	row := r.pool.QueryRow(ctx, q, receiptID)
+	e, err := scanExpense(row)
+	if err != nil {
+		return nil, mapExpensePgError(err)
+	}
+	return e, nil
+}
+
+// GetReceiptStorageURL returns the storage URL of the receipt associated with an expense.
+// Scoped to ownerID for multi-tenant isolation. Returns ErrNotFound if no match.
+func (r *pgxRepository) GetReceiptStorageURL(ctx context.Context, id, ownerID uuid.UUID) (string, error) {
+	const q = `
+		SELECT r.storage_url
+		FROM expenses e
+		JOIN receipts r ON r.id = e.receipt_id
+		WHERE e.id = $1 AND e.owner_id = $2`
+	var url string
+	err := r.pool.QueryRow(ctx, q, id, ownerID).Scan(&url)
+	if err != nil {
+		return "", mapExpensePgError(err)
+	}
+	return url, nil
 }
 
 // UpdateReceiptID updates the receipt_id for an expense (used when a driver submits additional evidence).

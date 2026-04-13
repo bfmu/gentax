@@ -161,6 +161,72 @@ func TestProcessor_OCRFailed(t *testing.T) {
 	}
 }
 
+// TestProcessor_UpdatesExpenseAmountAfterOCR verifies that after a successful OCR with a total,
+// the ExpenseAmountUpdater is called with the parsed amount.
+func TestProcessor_UpdatesExpenseAmountAfterOCR(t *testing.T) {
+	ctx := context.Background()
+
+	srv := makeImageServer(t)
+	id := uuid.New()
+	r := newTestReceipt(srv.URL)
+	r.ID = id
+
+	total := "150000"
+	ocrResult := &receipt.OCRResult{
+		Total:   &total,
+		RawJSON: []byte(`{"fields":{}}`),
+	}
+
+	mockRepo := &receipt.MockRepository{}
+	mockOCR := &receipt.MockOCRClient{}
+	mockUpdater := &receipt.MockExpenseAmountUpdater{}
+
+	mockRepo.On("GetByID", ctx, id).Return(r, nil)
+	mockRepo.On("SetOCRStatus", ctx, id, receipt.OCRStatusProcessing, []byte(nil)).Return(nil)
+	mockOCR.On("ExtractData", ctx, fakeImageBytes).Return(ocrResult, nil)
+	mockRepo.On("UpdateOCRFields", ctx, id, ocrResult).Return(nil)
+	mockRepo.On("SetOCRStatus", ctx, id, receipt.OCRStatusDone, ocrResult.RawJSON).Return(nil)
+	mockUpdater.On("UpdateAmountByReceiptID", ctx, id, mock.Anything).Return(nil)
+
+	p := receipt.NewProcessor(mockRepo, mockOCR, nil, nil, receipt.WithExpenseAmountUpdater(mockUpdater))
+	err := p.Process(ctx, id)
+
+	require.NoError(t, err)
+	mockUpdater.AssertCalled(t, "UpdateAmountByReceiptID", ctx, id, mock.Anything)
+}
+
+// TestProcessor_SkipsAmountUpdateWhenTotalNil verifies that when OCR returns no total,
+// the ExpenseAmountUpdater is NOT called.
+func TestProcessor_SkipsAmountUpdateWhenTotalNil(t *testing.T) {
+	ctx := context.Background()
+
+	srv := makeImageServer(t)
+	id := uuid.New()
+	r := newTestReceipt(srv.URL)
+	r.ID = id
+
+	ocrResult := &receipt.OCRResult{
+		Total:   nil, // no total extracted
+		RawJSON: []byte(`{"fields":{}}`),
+	}
+
+	mockRepo := &receipt.MockRepository{}
+	mockOCR := &receipt.MockOCRClient{}
+	mockUpdater := &receipt.MockExpenseAmountUpdater{}
+
+	mockRepo.On("GetByID", ctx, id).Return(r, nil)
+	mockRepo.On("SetOCRStatus", ctx, id, receipt.OCRStatusProcessing, []byte(nil)).Return(nil)
+	mockOCR.On("ExtractData", ctx, fakeImageBytes).Return(ocrResult, nil)
+	mockRepo.On("UpdateOCRFields", ctx, id, ocrResult).Return(nil)
+	mockRepo.On("SetOCRStatus", ctx, id, receipt.OCRStatusDone, ocrResult.RawJSON).Return(nil)
+
+	p := receipt.NewProcessor(mockRepo, mockOCR, nil, nil, receipt.WithExpenseAmountUpdater(mockUpdater))
+	err := p.Process(ctx, id)
+
+	require.NoError(t, err)
+	mockUpdater.AssertNotCalled(t, "UpdateAmountByReceiptID")
+}
+
 // TestProcessor_SkipLocked verifies that concurrent calls to ListPendingOCR return
 // different receipts (simulating SKIP LOCKED behaviour via the mock).
 func TestProcessor_SkipLocked(t *testing.T) {

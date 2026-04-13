@@ -228,8 +228,8 @@ func TestExpenseService_Approve_Success(t *testing.T) {
 	repo.AssertExpectations(t)
 }
 
-// TestExpenseService_Approve_WrongStatus verifies that approving a pending expense
-// returns ErrInvalidTransition (REQ-APR-02, REQ-FRD-03).
+// TestExpenseService_Approve_WrongStatus verifies that approving an already-approved expense
+// returns ErrInvalidTransition (terminal state — no outgoing transitions).
 func TestExpenseService_Approve_WrongStatus(t *testing.T) {
 	repo := new(expense.MockRepository)
 	svc := expense.NewService(repo)
@@ -237,13 +237,13 @@ func TestExpenseService_Approve_WrongStatus(t *testing.T) {
 	expID := uuid.New()
 	ownerID := uuid.New()
 
-	pending := &expense.Expense{
+	approved := &expense.Expense{
 		ID:      expID,
 		OwnerID: ownerID,
-		Status:  expense.StatusPending,
+		Status:  expense.StatusApproved,
 	}
 
-	repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(approved, nil)
 
 	err := svc.Approve(context.Background(), expID, ownerID)
 
@@ -326,10 +326,7 @@ func TestExpenseService_StateMachine_TableTest(t *testing.T) {
 	}
 
 	invalidTransitions := []transition{
-		// pending can only go to confirmed
-		{from: expense.StatusPending, to: expense.StatusApproved},
-		{from: expense.StatusPending, to: expense.StatusRejected},
-		// confirmed can only go to approved or rejected
+		// confirmed can only go to approved, rejected, or needs_evidence
 		{from: expense.StatusConfirmed, to: expense.StatusPending},
 		// terminal states — no outgoing edges
 		{from: expense.StatusApproved, to: expense.StatusPending},
@@ -370,22 +367,11 @@ func TestExpenseService_StateMachine_TableTest(t *testing.T) {
 				err = svc.Reject(context.Background(), expID, ownerID, "reason")
 			case expense.StatusPending:
 				// There is no "move to pending" operation in the Service interface.
-				// Attempting to confirm a terminal status also catches pending→pending.
-				if tc.from == expense.StatusConfirmed {
-					// confirmed cannot go back to pending — only approve/reject are valid
-					// Use Approve with a pending expense to verify the guard works.
-					pending := &expense.Expense{
-						ID:      expID,
-						OwnerID: ownerID,
-						Status:  expense.StatusPending,
-					}
-					repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
-					err = svc.Approve(context.Background(), expID, ownerID)
-				} else {
-					// For approved/rejected → pending: use Approve or Reject
-					repo.On("GetByID", context.Background(), expID, ownerID).Return(existing, nil)
-					err = svc.Approve(context.Background(), expID, ownerID)
-				}
+				// For any status → pending (all invalid): use Confirm with a non-pending expense.
+				// confirmed→pending: Confirm is the only path to "pending" re-entry which is blocked.
+				// approved/rejected → pending: also blocked.
+				repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+				err = svc.Confirm(context.Background(), expID, driverID)
 			}
 
 			require.ErrorIs(t, err, expense.ErrInvalidTransition,
@@ -430,15 +416,15 @@ func TestExpenseService_RequestEvidence(t *testing.T) {
 		repo.AssertExpectations(t)
 	})
 
-	t.Run("invalid_status_pending", func(t *testing.T) {
+	t.Run("invalid_status_approved", func(t *testing.T) {
 		repo := new(expense.MockRepository)
 		svc := expense.NewService(repo)
 
 		expID := uuid.New()
 		ownerID := uuid.New()
-		pending := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusPending}
+		approved := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusApproved}
 
-		repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
+		repo.On("GetByID", context.Background(), expID, ownerID).Return(approved, nil)
 
 		err := svc.RequestEvidence(context.Background(), expID, ownerID, "request message")
 		require.ErrorIs(t, err, expense.ErrInvalidTransition)
@@ -667,6 +653,135 @@ func TestExpenseService_SumByDriver(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, expected, got)
+	repo.AssertExpectations(t)
+}
+
+// TestService_UpdateAmountByReceiptID verifies delegation to repo.GetByReceiptID then repo.UpdateAmount.
+func TestService_UpdateAmountByReceiptID(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	receiptID := uuid.New()
+	expID := uuid.New()
+	amount := decimal.NewFromInt(75000)
+
+	existing := &expense.Expense{ID: expID, ReceiptID: receiptID}
+	repo.On("GetByReceiptID", context.Background(), receiptID).Return(existing, nil)
+	repo.On("UpdateAmount", context.Background(), expID, amount).Return(nil)
+
+	err := svc.UpdateAmountByReceiptID(context.Background(), receiptID, amount)
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+}
+
+// TestService_GetReceiptStorageURL verifies delegation to repo.GetReceiptStorageURL.
+func TestService_GetReceiptStorageURL(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+	expectedURL := "file:///tmp/receipts/abc.jpg"
+
+	repo.On("GetReceiptStorageURL", context.Background(), expID, ownerID).Return(expectedURL, nil)
+
+	url, err := svc.GetReceiptStorageURL(context.Background(), expID, ownerID)
+	require.NoError(t, err)
+	assert.Equal(t, expectedURL, url)
+	repo.AssertExpectations(t)
+}
+
+// TestService_AttachOptionalEvidence verifies driverID verification + UpdateReceiptID only.
+func TestService_AttachOptionalEvidence(t *testing.T) {
+	t.Run("happy_path", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		driverID := uuid.New()
+		receiptID := uuid.New()
+
+		existing := &expense.Expense{ID: expID, DriverID: driverID, Status: expense.StatusConfirmed}
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+		repo.On("UpdateReceiptID", context.Background(), expID, receiptID).Return(nil)
+
+		err := svc.AttachOptionalEvidence(context.Background(), expID, driverID, receiptID)
+		require.NoError(t, err)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("wrong_driver", func(t *testing.T) {
+		repo := new(expense.MockRepository)
+		svc := expense.NewService(repo)
+
+		expID := uuid.New()
+		driverID := uuid.New()
+		wrongDriver := uuid.New()
+		receiptID := uuid.New()
+
+		existing := &expense.Expense{ID: expID, DriverID: driverID, Status: expense.StatusConfirmed}
+		repo.On("GetByID", context.Background(), expID, uuid.Nil).Return(existing, nil)
+
+		err := svc.AttachOptionalEvidence(context.Background(), expID, wrongDriver, receiptID)
+		require.ErrorIs(t, err, expense.ErrNotFound)
+		repo.AssertNotCalled(t, "UpdateReceiptID")
+		repo.AssertExpectations(t)
+	})
+}
+
+// TestService_Approve_FromPending verifies pending → approved transition (extended valid transitions).
+func TestService_Approve_FromPending(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+
+	pending := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusPending}
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
+	repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusApproved, &ownerID, "").Return(nil)
+
+	err := svc.Approve(context.Background(), expID, ownerID)
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+}
+
+// TestService_Reject_FromPending verifies pending → rejected transition (extended valid transitions).
+func TestService_Reject_FromPending(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	expID := uuid.New()
+	ownerID := uuid.New()
+
+	pending := &expense.Expense{ID: expID, OwnerID: ownerID, Status: expense.StatusPending}
+	repo.On("GetByID", context.Background(), expID, ownerID).Return(pending, nil)
+	repo.On("UpdateStatus", context.Background(), expID, ownerID, expense.StatusRejected, &ownerID, "bad receipt").Return(nil)
+
+	err := svc.Reject(context.Background(), expID, ownerID, "bad receipt")
+	require.NoError(t, err)
+	repo.AssertExpectations(t)
+}
+
+// TestListFilter_MultiStatus verifies that ListFilter.Statuses can hold multiple status values.
+func TestListFilter_MultiStatus(t *testing.T) {
+	repo := new(expense.MockRepository)
+	svc := expense.NewService(repo)
+
+	ownerID := uuid.New()
+	filter := expense.ListFilter{
+		OwnerID:  ownerID,
+		Statuses: []expense.Status{expense.StatusPending, expense.StatusConfirmed},
+		Limit:    20,
+	}
+
+	require.Len(t, filter.Statuses, 2)
+	assert.Equal(t, expense.StatusPending, filter.Statuses[0])
+	assert.Equal(t, expense.StatusConfirmed, filter.Statuses[1])
+
+	repo.On("List", context.Background(), filter).Return([]*expense.Expense{}, nil)
+	_, err := svc.List(context.Background(), filter)
+	require.NoError(t, err)
 	repo.AssertExpectations(t)
 }
 
