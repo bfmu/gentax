@@ -610,8 +610,11 @@ func TestHandleGasto_SingleTaxi_AutoSelects(t *testing.T) {
 func TestHandleGasto_Unauthenticated_PromptsStart(t *testing.T) {
 	const telegramID = int64(777)
 
-	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, &mockExpenseService{}, &mockReceiptRepo{})
-	// No FSM state seeded — claims will be nil.
+	driverRepo := &mockDriverRepo{}
+	// No state seeded — ensureAuthenticated will try GetByTelegramID, return not found.
+	driverRepo.On("GetByTelegramID", mock.Anything, int64(telegramID)).Return(nil, driver.ErrNotFound)
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, driverRepo, &mockExpenseService{}, &mockReceiptRepo{})
 
 	ctx := &fakeCtx{sender: userWithID(telegramID), text: "/gasto"}
 	err := b.handleGasto(ctx)
@@ -619,7 +622,7 @@ func TestHandleGasto_Unauthenticated_PromptsStart(t *testing.T) {
 
 	texts := ctx.sentTexts()
 	require.Len(t, texts, 1)
-	assert.Contains(t, texts[0], "/start")
+	assert.Contains(t, texts[0], "vinculada")
 }
 
 // TestHandleGasto_ManualAmount_CreatesExpense exercises the full manual-amount
@@ -753,8 +756,11 @@ func TestHandleEstado_Empty_ReturnsNoExpensesMsg(t *testing.T) {
 func TestHandleEstado_Unauthenticated_PromptsStart(t *testing.T) {
 	const telegramID = int64(1001)
 
-	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, &mockDriverRepo{}, &mockExpenseService{}, &mockReceiptRepo{})
-	// No FSM state — claims are nil.
+	driverRepo := &mockDriverRepo{}
+	driverRepo.On("GetByTelegramID", mock.Anything, int64(telegramID)).Return(nil, driver.ErrNotFound)
+
+	b := makeBot(&mockTokenIssuer{}, &mockDriverService{}, driverRepo, &mockExpenseService{}, &mockReceiptRepo{})
+	// No FSM state — ensureAuthenticated will try lookup and fail.
 
 	ctx := &fakeCtx{sender: userWithID(telegramID)}
 	err := b.handleEstado(ctx)
@@ -762,7 +768,7 @@ func TestHandleEstado_Unauthenticated_PromptsStart(t *testing.T) {
 
 	texts := ctx.sentTexts()
 	require.Len(t, texts, 1)
-	assert.Contains(t, texts[0], "/start")
+	assert.Contains(t, texts[0], "vinculada")
 }
 
 // ─── NotifyOCRResult ──────────────────────────────────────────────────────────

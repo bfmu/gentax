@@ -108,6 +108,44 @@ func (b *Bot) handleStartWithToken(ctx context.Context, c tele.Context, telegram
 	return b.issueJWTAndWelcome(ctx, c, drv)
 }
 
+// ensureAuthenticated checks if the user has active claims. If not, it looks up the driver
+// by Telegram ID and silently re-issues a JWT (happens after bot restarts).
+// Returns the ConversationState with valid Claims, or an error if the driver isn't linked.
+func (b *Bot) ensureAuthenticated(ctx context.Context, c tele.Context) (*ConversationState, error) {
+	telegramID := c.Sender().ID
+	cs := b.states.get(telegramID)
+	if cs.Claims != nil {
+		return cs, nil
+	}
+
+	// Claims lost (bot restart) — re-authenticate silently by Telegram ID.
+	drv, err := b.services.DriverRepo.GetByTelegramID(ctx, telegramID)
+	if err != nil || !drv.Active {
+		return nil, fmt.Errorf("not linked")
+	}
+	claims := auth.Claims{
+		UserID:   drv.ID,
+		Role:     auth.RoleDriver,
+		OwnerID:  drv.OwnerID,
+		DriverID: &drv.ID,
+	}
+	token, err := b.services.Auth.Issue(claims, jwtTTL)
+	if err != nil {
+		return nil, fmt.Errorf("issue jwt: %w", err)
+	}
+	cs = &ConversationState{
+		State: StateIdle,
+		Claims: &botClaims{
+			DriverID: drv.ID,
+			OwnerID:  drv.OwnerID,
+			UserID:   drv.ID,
+			Token:    token,
+		},
+	}
+	b.states.set(telegramID, cs)
+	return cs, nil
+}
+
 // issueJWTAndWelcome issues a JWT and stores claims in the FSM, then greets the driver.
 func (b *Bot) issueJWTAndWelcome(_ context.Context, c tele.Context, drv *driver.Driver) error {
 	claims := auth.Claims{
@@ -234,9 +272,9 @@ func (b *Bot) handleGasto(c tele.Context) error {
 	ctx := context.Background()
 	telegramID := c.Sender().ID
 
-	cs := b.states.get(telegramID)
-	if cs.Claims == nil {
-		return c.Send("Necesitás iniciar sesión primero. Usá /start.")
+	cs, err := b.ensureAuthenticated(ctx, c)
+	if err != nil {
+		return c.Send("Tu cuenta no está vinculada. Pedí al administrador un enlace de activación.")
 	}
 
 	taxiIDs, err := b.getDriverTaxiIDs(ctx, cs.Claims.DriverID)
@@ -344,10 +382,9 @@ func (b *Bot) handleCategorySelection(c tele.Context) error {
 func (b *Bot) handleSoporte(c tele.Context) error {
 	ctx := context.Background()
 	telegramID := c.Sender().ID
-	cs := b.states.get(telegramID)
-
-	if cs.Claims == nil {
-		return c.Send("Necesitás iniciar sesión primero. Usá /start.")
+	cs, err := b.ensureAuthenticated(ctx, c)
+	if err != nil {
+		return c.Send("Tu cuenta no está vinculada. Pedí al administrador un enlace de activación.")
 	}
 
 	driverID := cs.Claims.DriverID
@@ -386,10 +423,9 @@ func (b *Bot) handleSoporte(c tele.Context) error {
 func (b *Bot) handlePhoto(c tele.Context) error {
 	ctx := context.Background()
 	telegramID := c.Sender().ID
-	cs := b.states.get(telegramID)
-
-	if cs.Claims == nil {
-		return c.Send("No estás autenticado. Enviá /start para iniciar sesión.")
+	cs, err := b.ensureAuthenticated(ctx, c)
+	if err != nil {
+		return c.Send("Tu cuenta no está vinculada. Pedí al administrador un enlace de activación.")
 	}
 
 	if cs.State == StateAwaitingEvidencePhoto {
@@ -474,11 +510,9 @@ func (b *Bot) handlePhoto(c tele.Context) error {
 // handleText routes text messages based on FSM state.
 func (b *Bot) handleText(c tele.Context) error {
 	ctx := context.Background()
-	telegramID := c.Sender().ID
-	cs := b.states.get(telegramID)
-
-	if cs.Claims == nil {
-		return c.Send("No estás autenticado. Pedí al administrador un enlace de activación.")
+	cs, err := b.ensureAuthenticated(ctx, c)
+	if err != nil {
+		return c.Send("Tu cuenta no está vinculada. Pedí al administrador un enlace de activación.")
 	}
 
 	// Route persistent keyboard button taps.
@@ -610,11 +644,9 @@ func (b *Bot) handleEditAmount(c tele.Context) error {
 // REQ-EXP-05, REQ-TNT-02.
 func (b *Bot) handleEstado(c tele.Context) error {
 	ctx := context.Background()
-	telegramID := c.Sender().ID
-	cs := b.states.get(telegramID)
-
-	if cs.Claims == nil {
-		return c.Send("Necesitás iniciar sesión primero. Usá /start.")
+	cs, err := b.ensureAuthenticated(ctx, c)
+	if err != nil {
+		return c.Send("Tu cuenta no está vinculada. Pedí al administrador un enlace de activación.")
 	}
 
 	driverID := cs.Claims.DriverID
