@@ -61,8 +61,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start OCR worker in background.
-	go deps.OCRWorker.Start(ctx)
+	// NOTE: OCR worker runs only in the bot process (cmd/bot/main.go).
+	// Running it here too caused a race: the API processed receipts without
+	// wiring the Telegram notify, so drivers never received OCR results.
 
 	// Build HTTP router.
 	svc := httpapi.Services{

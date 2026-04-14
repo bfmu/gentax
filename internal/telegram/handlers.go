@@ -559,8 +559,10 @@ func (b *Bot) handleManualAmount(ctx context.Context, c tele.Context, cs *Conver
 		}
 	}
 
-	b.states.reset(telegramID)
-	return c.Send("Gasto registrado ✓")
+	// Transition to optional evidence so the driver can attach photos/docs.
+	cs.State = StateAwaitingOptionalEvidence
+	b.states.set(telegramID, cs)
+	return c.Send("Gasto registrado ✓\n\nSi querés adjuntar una foto como soporte adicional, enviala ahora.", omitirDoneKeyboard())
 }
 
 // handleConfirmOCR processes the "Confirmar" callback.

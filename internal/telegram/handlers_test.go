@@ -669,9 +669,9 @@ func TestHandleGasto_ManualAmount_CreatesExpense(t *testing.T) {
 	require.Len(t, texts, 1)
 	assert.Contains(t, texts[0], "registrado")
 
-	// FSM should be reset to idle but claims preserved.
+	// FSM should transition to optional evidence so driver can attach photos.
 	cs := b.states.get(telegramID)
-	assert.Equal(t, StateIdle, cs.State)
+	assert.Equal(t, StateAwaitingOptionalEvidence, cs.State)
 	assert.NotNil(t, cs.Claims)
 
 	rcptRepo.AssertExpectations(t)
