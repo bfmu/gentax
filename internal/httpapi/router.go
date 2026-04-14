@@ -103,6 +103,7 @@ func NewRouter(svc Services, issuer auth.TokenIssuer) http.Handler {
 		r.Get("/expenses/{id}", expenseH.GetByID)
 		r.Get("/expenses/{id}/receipt", expenseH.ReceiptProxy)
 		r.Get("/expenses/{id}/attachments", expenseH.ListAttachments)
+		r.Get("/expenses/{id}/attachments/{attachmentId}/image", expenseH.AttachmentImageProxy)
 		r.Patch("/expenses/{id}/approve", expenseH.Approve)
 		r.Patch("/expenses/{id}/reject", expenseH.Reject)
 		r.Patch("/expenses/{id}/request-evidence", expenseH.RequestEvidence)

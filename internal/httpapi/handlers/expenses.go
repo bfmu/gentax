@@ -411,6 +411,56 @@ func (h *ExpenseHandler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "attached"})
 }
 
+// AttachmentImageProxy handles GET /expenses/{id}/attachments/{attachmentId}/image (role=admin).
+func (h *ExpenseHandler) AttachmentImageProxy(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		mw.WriteError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+	expenseID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid expense id", "bad_request")
+		return
+	}
+	attachmentID, err := uuid.Parse(chi.URLParam(r, "attachmentId"))
+	if err != nil {
+		mw.WriteError(w, http.StatusBadRequest, "invalid attachment id", "bad_request")
+		return
+	}
+
+	// Fetch all attachments and find matching one (reuse existing service method).
+	attachments, err := h.expenseSvc.ListAttachments(r.Context(), expenseID, claims.OwnerID)
+	if err != nil {
+		mw.DomainError(w, err)
+		return
+	}
+	var storageURL string
+	for _, a := range attachments {
+		if a.ID == attachmentID {
+			storageURL = a.StorageURL
+			break
+		}
+	}
+	if storageURL == "" {
+		mw.WriteError(w, http.StatusNotFound, "attachment not found", "not_found")
+		return
+	}
+
+	if h.storageReader == nil {
+		mw.WriteError(w, http.StatusServiceUnavailable, "storage reader not configured", "not_configured")
+		return
+	}
+	data, err := h.storageReader.Download(r.Context(), storageURL)
+	if err != nil {
+		mw.WriteError(w, http.StatusBadGateway, "failed to fetch attachment", "storage_error")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 // ReceiptProxy handles GET /expenses/{id}/receipt.
 // It fetches the storage URL from the service layer, then reads the bytes (via StorageReader
 // for file:// paths or direct HTTP for cloud URLs) and pipes them to the client.

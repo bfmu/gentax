@@ -1147,7 +1147,6 @@ func TestHandleOptionalEvidencePhoto_AttachesAndResets(t *testing.T) {
 	})).Return(&receipt.Receipt{ID: receiptID}, nil)
 
 	expSvc := &mockExpenseService{}
-	expSvc.On("AttachOptionalEvidence", mock.Anything, expenseID, driverID, receiptID).Return(nil)
 	expSvc.On("AddAttachment", mock.Anything, expenseID, driverID, receiptID, "").Return(nil)
 	// showMainMenu is not called from handleOptionalEvidencePhoto; no needs_evidence mock needed.
 

@@ -754,13 +754,7 @@ func (b *Bot) handleOptionalEvidencePhoto(ctx context.Context, c tele.Context, c
 		return c.Send("Error al registrar el comprobante. Intentá de nuevo.")
 	}
 
-	// Also keep backward-compat by updating the primary receipt on the expense.
-	if err := b.services.Expense.AttachOptionalEvidence(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID); err != nil {
-		slog.Error("failed to attach optional evidence (primary)", "err", err)
-		return c.Send("Error al adjuntar la evidencia. Intentá de nuevo.")
-	}
-
-	// Also record in the multi-attachment table (label left empty for optional evidence).
+	// Record in the multi-attachment table (label left empty for optional evidence).
 	if err := b.services.Expense.AddAttachment(ctx, *cs.PendingExpenseID, cs.Claims.DriverID, createdReceipt.ID, ""); err != nil {
 		slog.Error("failed to add attachment record", "err", err)
 		// Non-fatal: primary attachment succeeded, log and continue.

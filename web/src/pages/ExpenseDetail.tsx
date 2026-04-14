@@ -38,6 +38,7 @@ export default function ExpenseDetail() {
   const [evidenceMessage, setEvidenceMessage] = useState('');
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({});
 
   async function load() {
     try {
@@ -60,6 +61,24 @@ export default function ExpenseDetail() {
       .then(res => setAttachments(res.data ?? []))
       .catch(() => setAttachments([]));
   }, [id]);
+
+  useEffect(() => {
+    if (!id || attachments.length === 0) return;
+    const objectUrls: Record<string, string> = {};
+    Promise.all(
+      attachments.map(att =>
+        client.get<Blob>(`/expenses/${id}/attachments/${att.id}/image`, { responseType: 'blob' })
+          .then(res => {
+            objectUrls[att.id] = URL.createObjectURL(res.data);
+          })
+          .catch(() => {}) // attachment may not be an image, skip
+      )
+    ).then(() => setAttachmentUrls({ ...objectUrls }));
+
+    return () => {
+      Object.values(objectUrls).forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [id, attachments]);
 
   useEffect(() => {
     if (!id) return;
@@ -245,21 +264,17 @@ export default function ExpenseDetail() {
           <CardContent>
             <div className="space-y-3">
               {attachments.map((att) => (
-                <div key={att.id} className="flex items-center justify-between border rounded p-3 text-sm">
+                <div key={att.id} className="border rounded p-3 text-sm space-y-2">
                   <div>
                     <p className="font-medium">{att.label || 'Soporte'}</p>
                     <p className="text-muted-foreground text-xs">
                       {new Date(att.created_at).toLocaleDateString('es-CO')}
                     </p>
                   </div>
-                  {att.storage_url && (
-                    <a
-                      href={att.storage_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <Button variant="outline" size="sm">Ver</Button>
-                    </a>
+                  {attachmentUrls[att.id] ? (
+                    <img src={attachmentUrls[att.id]} alt={att.label || 'Soporte'} className="max-w-full rounded border mt-2" />
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-1">Cargando imagen...</p>
                   )}
                 </div>
               ))}

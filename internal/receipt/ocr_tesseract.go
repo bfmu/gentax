@@ -63,8 +63,8 @@ var (
 	// CUFE: 96-character hex string (DIAN electronic invoice unique code).
 	reCUFE = regexp.MustCompile(`\b([0-9a-fA-F]{96})\b`)
 
-	// Total: "TOTAL", "VALOR TOTAL", "TOTAL A PAGAR", "TOTAL FACTURA" etc. followed by optional $ or COP and digits.
-	reTotal = regexp.MustCompile(`(?i)\b(?:VALOR\s+)?TOTAL(?:\s+(?:A\s+PAGAR|FACTURA|INCLUIDO|IVA|VENTA))?[^\n$0-9]*[\$COP\s]*([0-9][0-9.,]*)`)
+	// Total: "TOTAL", "VALOR TOTAL", "TOTAL A PAGAR", "COMPRA NETA", "COMPRA", "SUBTOTAL", "VALOR" etc. followed by optional $ or COP and digits.
+	reTotal = regexp.MustCompile(`(?i)\b(?:VALOR\s+)?(?:TOTAL(?:\s+(?:A\s+PAGAR|FACTURA|INCLUIDO|IVA|VENTA))?|COMPRA(?:\s+NETA)?|SUBTOTAL|VALOR)[^\n$0-9]*[\$COP\s]*([0-9][0-9.,]*)`)
 
 	// Date: DD/MM/YYYY or YYYY-MM-DD.
 	reDate = regexp.MustCompile(`\b(\d{2}/\d{2}/\d{4}|\d{4}-\d{2}-\d{2})\b`)
